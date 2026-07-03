@@ -5,8 +5,21 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "accelerate>=1.14.0",
     "matplotlib>=3.11.0",
     "numpy>=2.4.6",
-    "torch>=2.12.1",
-    "torchvision>=0.27.1",
+    "pillow>=12.3.0",
+    "qwen-vl-utils[decord]==0.0.8",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+    "transformers>=5.13.0",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
