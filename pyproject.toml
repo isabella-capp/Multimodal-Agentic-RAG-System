@@ -12,6 +12,7 @@ dependencies = [
     "qwen-vl-utils==0.0.8",
     "torch==2.5.1",
     "torchvision==0.20.1",
+    "tqdm>=4.68.3",
     "transformers>=5.13.0",
 ]
 

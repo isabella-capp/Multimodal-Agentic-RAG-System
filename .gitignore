@@ -13,3 +13,6 @@ wheels/
 logs/
 *.out
 *.err
+
+# Output di inferenza/valutazione (rigenerabili, non versionati)
+outputs/

@@ -288,6 +288,7 @@ dependencies = [
     { name = "qwen-vl-utils" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
     { name = "transformers" },
 ]
 
@@ -300,6 +301,7 @@ requires-dist = [
     { name = "qwen-vl-utils", specifier = "==0.0.8" },
     { name = "torch", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu121" },
     { name = "torchvision", specifier = "==0.20.1", index = "https://download.pytorch.org/whl/cu121" },
+    { name = "tqdm", specifier = ">=4.68.3" },
     { name = "transformers", specifier = ">=5.13.0" },
 ]
 
