@@ -1,15 +1,27 @@
 #!/bin/bash
 #SBATCH --job-name=evaluate_model
-#SBATCH --partition=all_usr_prod
+#SBATCH --partition=all_serial
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:1
-#SBATCH --time=12:00:00
-#SBATCH --output=/homes/$USER/cvcs2026/logs/evaluate_%j.out
-#SBATCH --error=/homes/$USER/cvcs2026/logs/evaluate_%j.err
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
+#SBATCH --time=04:00:00
+#SBATCH --output=/homes/%u/cvcs2026/logs/evaluate_%j.out
+#SBATCH --error=/homes/%u/cvcs2026/logs/evaluate_%j.err
 #SBATCH --account=cvcs2026
 
-module load py-torch/2.8.0-gcc-11.4.0-cuda-12.6.3
-source /homes/$USER/cvcs2026/venv/bin/activate
+set -euo pipefail
 
-python evaluate.py 
+PROJECT_DIR="/homes/$USER/cvcs2026"
+
+export TFHUB_CACHE_DIR="/work/cvcs2026/recursive_retrievers/tfhub_cache"
+export PATH="$HOME/.local/bin:$PATH"
+unset SSL_CERT_DIR
+
+mkdir -p "$PROJECT_DIR/logs" "$PROJECT_DIR/outputs"
+
+# BEM runs on CPU; the eval lives in a separate uv project (its own .venv).
+cd "$PROJECT_DIR/evqa_eval"
+uv run python run_eval.py \
+    --predictions ../outputs/predictions.jsonl \
+    --output ../outputs/results.json
