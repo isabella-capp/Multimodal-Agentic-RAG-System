@@ -18,6 +18,8 @@ import argparse
 import json
 from collections import defaultdict
 
+from tqdm import tqdm
+
 import evaluation_utils
 
 
@@ -54,11 +56,9 @@ def main():
     scoring_function = evaluation_utils.initialize_encyclopedic_vqa_evaluation_function()
 
     scores_by_type = defaultdict(list)
-    for i, record in enumerate(records, start=1):
+    for record in tqdm(records, desc="Scoring"):
         score = score_prediction(record, scoring_function)
         scores_by_type[record["question_type"]].append(score)
-        if i % 50 == 0:
-            print(f"  scored {i}/{len(records)}")
 
     all_scores = [s for scores in scores_by_type.values() for s in scores]
     overall = sum(all_scores) / len(all_scores) if all_scores else 0.0

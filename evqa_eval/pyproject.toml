@@ -11,4 +11,5 @@ dependencies = [
     "tensorflow==2.12.0",
     "tensorflow_hub==0.13.0",
     "tensorflow_text==2.12.0",
+    "tqdm>=4.68.3",
 ]
