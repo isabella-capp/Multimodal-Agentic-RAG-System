@@ -1,0 +1,13 @@
+[project]
+name = "evqa-eval"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy==1.23",
+    "scipy==1.11.1",
+    "tensorflow==2.12.0",
+    "tensorflow_hub==0.13.0",
+    "tensorflow_text==2.12.0",
+]
