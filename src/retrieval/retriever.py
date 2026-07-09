@@ -33,12 +33,11 @@ class Retriever:
         top_k : int
             Number of nearest neighbours to retrieve.
         device : str | None
-            Torch device string. Defaults to CUDA if available.
+            Torch device string.  Defaults to ``"cpu"`` to avoid VRAM
+            conflicts when a VLM is already loaded on GPU.
         """
         self.top_k = top_k
-        self.device = torch.device(
-            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = torch.device(device if device else "cpu")
 
         self._img_index_path = img_index_path
         self._img_index_json_path = img_index_json_path
@@ -70,6 +69,11 @@ class Retriever:
         if self.embedding_model is not None:
             return
 
+        # Use float32 on CPU (float16 is slow / poorly supported on CPU)
+        self._model_dtype = (
+            torch.float16 if self.device.type == "cuda" else torch.float32
+        )
+
         print("Loading EVA-CLIP embedding model …")
         self.processor = CLIPImageProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
@@ -80,13 +84,14 @@ class Retriever:
         self.embedding_model = (
             AutoModel.from_pretrained(
                 "BAAI/EVA-CLIP-8B",
-                torch_dtype=torch.float16,
+                torch_dtype=self._model_dtype,
                 trust_remote_code=True,
             )
             .to(self.device)
             .eval()
         )
-        print("EVA-CLIP model loaded.")
+        print(f"EVA-CLIP model loaded on {self.device} ({self._model_dtype}).")
+
 
     # ------------------------------------------------------------------
     # Core methods
@@ -100,7 +105,7 @@ class Retriever:
         self._ensure_model()
 
         image_tensor = self.processor(image, return_tensors="pt").pixel_values.to(
-            self.device, dtype=torch.float16
+            self.device, dtype=self._model_dtype
         )
 
         with torch.no_grad():
