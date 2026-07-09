@@ -69,10 +69,8 @@ class Retriever:
         if self.embedding_model is not None:
             return
 
-        # Use float32 on CPU (float16 is slow / poorly supported on CPU)
-        self._model_dtype = (
-            torch.float16 if self.device.type == "cuda" else torch.float32
-        )
+        # Always use float16 to keep RAM usage manageable (~16 GB vs ~32 GB)
+        self._model_dtype = torch.float16
 
         print("Loading EVA-CLIP embedding model …")
         self.processor = CLIPImageProcessor.from_pretrained(
