@@ -20,7 +20,7 @@ from collections import defaultdict
 
 from tqdm import tqdm
 
-import evaluation_utils
+import evqa_eval.evaluation_utils as evaluation_utils
 
 
 def read_predictions(path):
