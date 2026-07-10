@@ -102,7 +102,7 @@ def parse_args():
         "--rerank-top-n",
         type=int,
         default=3,
-        help="Number of paragraphs to keep (after reranking, or the first N if --no-rerank).",
+        help="Number of paragraphs to keep (after reranking, or the first N if --no-rerank). With --no-rerank, <=0 means keep all pooled paragraphs.",
     )
     parser.add_argument(
         "--no-rerank",
@@ -113,6 +113,17 @@ def parse_args():
         "--retriever-device",
         default="cuda",
         help="Device for the EVA-CLIP retriever (e.g. 'cuda', 'cpu').",
+    )
+    parser.add_argument(
+        "--reranker",
+        choices=["clip", "cross"],
+        default="clip",
+        help="Paragraph reranker: 'clip' (EVA-CLIP bi-encoder) or 'cross' (cross-encoder).",
+    )
+    parser.add_argument(
+        "--cross-encoder-model",
+        default="BAAI/bge-reranker-base",
+        help="Cross-encoder model to use when --reranker cross.",
     )
     parser.add_argument(
         "--debug-samples",
@@ -174,6 +185,14 @@ def main():
         )
         kb = KnowledgeBase(args.kb_path)
 
+    reranker = None
+    if args.use_retrieval and not args.no_rerank and args.reranker == "cross":
+        from retrieval.reranker import CrossEncoderReranker
+
+        reranker = CrossEncoderReranker(
+            args.cross_encoder_model, device=args.retriever_device
+        )
+
     debug_count = 0
 
     with open(args.output, "a", encoding="utf-8") as out:
@@ -205,24 +224,44 @@ def main():
                     results = retriever.retrieve(user_image, item["question"])
 
                     if results:
-                        best_url = results[0]["wiki_url"]
-                        paragraphs = kb.get_paragraphs_by_url(best_url)
+                        # Pool paragraphs from all top-k retrieved articles.
+                        pooled = []
+                        for r in results:
+                            pooled.extend(kb.get_paragraphs_by_url(r["wiki_url"]))
 
-                        if paragraphs:
+                        if pooled:
                             if args.no_rerank:
-                                top_paragraphs = paragraphs[: args.rerank_top_n]
+                                top_paragraphs = (
+                                    pooled
+                                    if args.rerank_top_n <= 0
+                                    else pooled[: args.rerank_top_n]
+                                )
+                            elif reranker is not None:
+                                top_paragraphs = reranker.rerank(
+                                    item["question"],
+                                    pooled,
+                                    top_n=args.rerank_top_n,
+                                )
                             else:
                                 top_paragraphs = retriever.rerank_paragraphs(
                                     item["question"],
-                                    paragraphs,
+                                    pooled,
                                     top_n=args.rerank_top_n,
                                 )
                             prompt = build_rag_prompt(item["question"], top_paragraphs)
                             retrieved_context = {
-                                "wiki_url": best_url,
+                                "wiki_url": results[0]["wiki_url"],
                                 "title": results[0].get("title", ""),
                                 "score": results[0].get("score"),
-                                "num_paragraphs_total": len(paragraphs),
+                                "candidates": [
+                                    {
+                                        "wiki_url": r["wiki_url"],
+                                        "title": r.get("title", ""),
+                                        "score": r.get("score"),
+                                    }
+                                    for r in results
+                                ],
+                                "num_paragraphs_total": len(pooled),
                                 "num_paragraphs_used": len(top_paragraphs),
                             }
                 except Exception as e:
