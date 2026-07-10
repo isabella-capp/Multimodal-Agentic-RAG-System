@@ -13,7 +13,7 @@ class QwenVQAModel:
         print(f"Loading {model_name}...")
         
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_name, torch_dtype="auto", device_map="auto"
+            model_name, dtype="auto", device_map="auto"
         )
         self.processor = AutoProcessor.from_pretrained(model_name)
         self.model.eval()
@@ -67,28 +67,4 @@ def load_dataset(json_path, base_folder):
         item["image_path"] = os.path.join(base_folder, item["related_images"])
     return dataset
 
-
-if __name__ == "__main__":
-    model = QwenVQAModel()
-
-    json_path = "/work/cvcs2026/encyclopedic/encyclopedic_test_subset.json"
-    base_folder = "/work/cvcs2026/encyclopedic"
-    dataset = load_dataset(json_path, base_folder)
-
-    primo_elemento = dataset[0]
-    test_img = primo_elemento["image_path"]
-
-    print(f"Test image path: {test_img}")
-    print(f"Question: {primo_elemento['question']}")
-    
-    if not os.path.exists(test_img):
-        print(f"ERRORE: Non trovo l'immagine nel percorso: {test_img}")
-    else:
-        risposta_qwen = model.generate_response(test_img, primo_elemento["question"])
-        print("\n================ RISULTATO ================")
-        print(f"Argomento (Wikipedia) : {primo_elemento['wikipedia_title']}")
-        print(f"Domanda VQA           : {primo_elemento['question']}")
-        print(f"Risposta ATTESA       : {primo_elemento['answer']}")
-        print(f"Risposta di QWEN      : {risposta_qwen}")
-        print("===========================================")
 
