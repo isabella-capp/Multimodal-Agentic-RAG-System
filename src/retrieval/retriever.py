@@ -82,7 +82,7 @@ class Retriever:
         self.embedding_model = (
             AutoModel.from_pretrained(
                 "BAAI/EVA-CLIP-8B",
-                torch_dtype=self._model_dtype,
+                dtype=self._model_dtype,
                 trust_remote_code=True,
             )
             .to(self.device)
