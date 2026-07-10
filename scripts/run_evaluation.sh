@@ -22,6 +22,6 @@ mkdir -p "$PROJECT_DIR/logs" "$PROJECT_DIR/outputs"
 
 # BEM runs on CPU; the eval lives in a separate uv project (its own .venv).
 cd "$PROJECT_DIR/evqa_eval"
-uv run python run_eval.py \
-    --predictions ../outputs/predictions.jsonl \
-    --output ../outputs/results.json
+uv run python score_evqa.py \
+    --predictions ../outputs/predictions_rag.jsonl \
+    --output ../outputs/results_rag.json
