@@ -88,6 +88,17 @@ class Retriever:
             .to(self.device)
             .eval()
         )
+
+        # The `position_ids` buffers are non-persistent (not in the checkpoint)
+        # and end up as uninitialized memory under meta-device / low_cpu_mem_usage
+        # loading, causing out-of-range vision/text position embedding lookups.
+        # Re-materialize them as a proper arange on the target device.
+        for emb in (
+            self.embedding_model.vision_model.embeddings,
+            self.embedding_model.text_model.embeddings,
+        ):
+            n = emb.position_embedding.num_embeddings
+            emb.position_ids = torch.arange(n, device=self.device).expand((1, -1))
         print(f"EVA-CLIP model loaded on {self.device} ({self._model_dtype}).")
 
 
@@ -233,7 +244,9 @@ class Retriever:
         ).to(self.device)
 
         with torch.no_grad():
-            text_features = self.embedding_model.encode_text(tokens["input_ids"])
+            text_features = self.embedding_model.encode_text(
+                tokens["input_ids"], attention_mask=tokens.get("attention_mask")
+            )
 
         text_features = F.normalize(text_features, dim=-1)
         return text_features
