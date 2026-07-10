@@ -102,9 +102,51 @@ def parse_args():
         "--rerank-top-n",
         type=int,
         default=3,
-        help="Number of paragraphs to keep after reranking.",
+        help="Number of paragraphs to keep (after reranking, or the first N if --no-rerank).",
+    )
+    parser.add_argument(
+        "--no-rerank",
+        action="store_true",
+        help="Skip paragraph reranking; use the first --rerank-top-n paragraphs directly.",
+    )
+    parser.add_argument(
+        "--retriever-device",
+        default="cuda",
+        help="Device for the EVA-CLIP retriever (e.g. 'cuda', 'cpu').",
+    )
+    parser.add_argument(
+        "--debug-samples",
+        type=int,
+        default=3,
+        help="Print a detailed pipeline trace for the first N processed examples.",
     )
     return parser.parse_args()
+
+
+def _truncate(text: str, n: int = 200) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[:n] + " …"
+
+
+def print_debug_example(item, retrieved_context, top_paragraphs, prediction):
+    tqdm.write("\n" + "=" * 70)
+    tqdm.write(f"[DEBUG] {item['unique_id']}  ({item['question_type']})")
+    tqdm.write(f"  Q : {item['question']}")
+    tqdm.write(f"  GT: {item['answer']}")
+    if retrieved_context is not None:
+        tqdm.write(
+            f"  Retrieved: {retrieved_context['title']!r} "
+            f"(score={retrieved_context['score']}, "
+            f"paragraphs {retrieved_context['num_paragraphs_used']}/"
+            f"{retrieved_context['num_paragraphs_total']})"
+        )
+        tqdm.write(f"             {retrieved_context['wiki_url']}")
+        for i, p in enumerate(top_paragraphs or [], 1):
+            tqdm.write(f"    [{i}] {_truncate(p)}")
+    else:
+        tqdm.write("  Retrieved: <none> (baseline prompt, question only)")
+    tqdm.write(f"  Prediction: {prediction}")
+    tqdm.write("=" * 70)
 
 
 def main():
@@ -128,8 +170,11 @@ def main():
             img_index_path=args.img_index_path,
             img_index_json_path=args.img_index_json_path,
             top_k=args.top_k,
+            device=args.retriever_device,
         )
         kb = KnowledgeBase(args.kb_path)
+
+    debug_count = 0
 
     with open(args.output, "a", encoding="utf-8") as out:
         for item in tqdm(dataset, desc="Inference"):
@@ -150,6 +195,7 @@ def main():
                 continue
 
             retrieved_context = None
+            top_paragraphs = None
             prompt = item["question"]
 
             # --- Retrieval-augmented path ---
@@ -163,11 +209,14 @@ def main():
                         paragraphs = kb.get_paragraphs_by_url(best_url)
 
                         if paragraphs:
-                            top_paragraphs = retriever.rerank_paragraphs(
-                                item["question"],
-                                paragraphs,
-                                top_n=args.rerank_top_n,
-                            )
+                            if args.no_rerank:
+                                top_paragraphs = paragraphs[: args.rerank_top_n]
+                            else:
+                                top_paragraphs = retriever.rerank_paragraphs(
+                                    item["question"],
+                                    paragraphs,
+                                    top_n=args.rerank_top_n,
+                                )
                             prompt = build_rag_prompt(item["question"], top_paragraphs)
                             retrieved_context = {
                                 "wiki_url": best_url,
@@ -180,6 +229,10 @@ def main():
                     tqdm.write(f"retrieval failed for {item['unique_id']}: {e}")
 
             prediction = model.generate_response(image_path, prompt)
+
+            if debug_count < args.debug_samples:
+                print_debug_example(item, retrieved_context, top_paragraphs, prediction)
+                debug_count += 1
 
             out.write(
                 json.dumps(
