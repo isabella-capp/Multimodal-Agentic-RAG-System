@@ -34,7 +34,7 @@ def setup_args():
     parser.add_argument(
         "--kb_path",
         type=str,
-        default=f"{BASE_FOLDER}/encyclopedic_kb_wiki.json",
+        default=f"{BASE_FOLDER}/encyclopedic_kb_wiki.db",
         help="Path ai testi di Wiki",
     )
     parser.add_argument(
