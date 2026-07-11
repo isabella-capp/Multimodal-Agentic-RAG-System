@@ -19,9 +19,9 @@ import os
 import sys
 import time
 
-# Ensure project root is on sys.path so we can import src modules
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
+# Ensure src/ is on sys.path so we can import modules
+SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, SRC_ROOT)
 
 from collections import defaultdict
 from PIL import Image
