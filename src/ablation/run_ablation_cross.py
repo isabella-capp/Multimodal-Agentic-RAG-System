@@ -54,7 +54,7 @@ def parse_args():
     # Retriever
     p.add_argument("--img-index-path", default=f"{BASE_FOLDER}/knn.index")
     p.add_argument("--img-index-json-path", default=f"{BASE_FOLDER}/knn.json")
-    p.add_argument("--kb-path", default=f"{BASE_FOLDER}/encyclopedic_kb_wiki.json")
+    p.add_argument("--kb-path", default=f"{BASE_FOLDER}/encyclopedic_kb_wiki.db")
     p.add_argument("--retriever-device", default="cuda")
 
     # Cross-encoder

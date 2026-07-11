@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=gpu_A40_45G|gpu_L40S_45G
-#SBATCH --mem=128G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=06:00:00
 #SBATCH --output=/homes/%u/cvcs2026/logs/ablation_cross_%j.out
