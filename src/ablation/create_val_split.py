@@ -11,9 +11,13 @@ proportionally in both sets.  A fixed seed ensures reproducibility.
 import argparse
 import json
 import math
+import os
 import random
 from collections import Counter, defaultdict
 from pathlib import Path
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DEFAULT_OUTPUT_DIR = os.path.join(REPO_ROOT, "data")
 
 
 def parse_args():
@@ -27,7 +31,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output-dir",
-        default="/work/cvcs2026/encyclopedic",
+        default=DEFAULT_OUTPUT_DIR,
         help="Directory where val/test split files will be saved.",
     )
     parser.add_argument(

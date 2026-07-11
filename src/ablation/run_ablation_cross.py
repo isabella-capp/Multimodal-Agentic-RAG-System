@@ -34,6 +34,7 @@ from vlm.qwen_model import QwenVQAModel, load_dataset
 from vlm.run_inference import build_rag_prompt, build_record
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
+DATA_DIR = os.path.abspath(os.path.join(SRC_ROOT, "..", "data"))
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Ablation study: top-k × rerank-top-n (cross-encoder)")
 
     # Paths
-    p.add_argument("--val-json", default=f"{BASE_FOLDER}/encyclopedic_val_split.json",
+    p.add_argument("--val-json", default=f"{DATA_DIR}/encyclopedic_val_split.json",
                     help="Path to the validation split JSON.")
     p.add_argument("--base-folder", default=BASE_FOLDER)
     p.add_argument("--output-dir", default="outputs/ablation",
@@ -260,9 +261,16 @@ def main():
         result_path = os.path.join(args.output_dir, f"results_{config_name}.json")
 
         print(f"\n{'─'*70}")
-        print(f"[{i}/{len(grid)}] Running config: {config_name}")
-        print(f"  top_k={top_k}, rerank_top_n={rerank_n}")
+        print(f"[{i}/{len(grid)}] Config: {config_name}")
 
+        # Resume: skip configs already completed in a previous run.
+        if os.path.exists(result_path):
+            print(f"  [skip] already done → {result_path}")
+            with open(result_path, encoding="utf-8") as f:
+                all_results[config_name] = json.load(f)
+            continue
+
+        print(f"  top_k={top_k}, rerank_top_n={rerank_n}")
         t0 = time.time()
 
         records = run_single_config(
