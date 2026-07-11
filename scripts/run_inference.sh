@@ -26,9 +26,9 @@ cd "$PROJECT_DIR"
 mkdir -p logs outputs
 
 uv run python src/vlm/run_inference.py \
-    --output outputs/predictions_B2_1.jsonl \
+    --output outputs/predictions_B5.jsonl \
     --use-retrieval \
-    --top-k 5 \
-    --no-rerank \
-    --rerank-top-n 0 \
+    --top-k 20 \
+    --rerank-top-n 5 \
+    --reranker cross \
     --debug-samples 3
