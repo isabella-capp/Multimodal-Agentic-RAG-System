@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import faiss
 import json
 import numpy as np
-from transformers import CLIPImageProcessor, AutoModel, AutoTokenizer
+from transformers import CLIPImageProcessor, AutoModel
 from PIL import Image
 
 
@@ -12,7 +12,6 @@ class Retriever:
 
     Encodes a user image into an embedding, searches a FAISS index for the
     top-k most similar images, and returns the associated Wikipedia metadata.
-    Optionally reranks retrieved paragraphs by textual similarity to a query.
     """
 
     def __init__(
@@ -46,7 +45,6 @@ class Retriever:
         self.img_index = None
         self.img_values = None
         self.processor = None
-        self.tokenizer = None
         self.embedding_model = None
 
     # ------------------------------------------------------------------
@@ -65,7 +63,7 @@ class Retriever:
         print(f"FAISS index loaded ({self.img_index.ntotal} vectors).")
 
     def _ensure_model(self):
-        """Load the EVA-CLIP model, processor, and tokenizer (once)."""
+        """Load the EVA-CLIP model and image processor (once)."""
         if self.embedding_model is not None:
             return
 
@@ -75,9 +73,6 @@ class Retriever:
         print("Loading EVA-CLIP embedding model …")
         self.processor = CLIPImageProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            "BAAI/EVA-CLIP-8B", trust_remote_code=True
         )
         self.embedding_model = (
             AutoModel.from_pretrained(
@@ -178,75 +173,3 @@ class Retriever:
             results.append({**res, "score": score})
 
         return results
-
-    # ------------------------------------------------------------------
-    # Paragraph reranking
-    # ------------------------------------------------------------------
-
-    def rerank_paragraphs(
-        self, query: str, paragraphs: list[str], top_n: int = 3
-    ) -> list[str]:
-        """Rerank paragraphs by cosine similarity to the query.
-
-        Uses the EVA-CLIP text encoder to embed both the query and each
-        paragraph, then returns the *top_n* paragraphs sorted by
-        descending similarity.
-
-        Parameters
-        ----------
-        query : str
-            The user question.
-        paragraphs : list[str]
-            Candidate paragraphs from the knowledge base.
-        top_n : int
-            Number of top paragraphs to return.
-
-        Returns
-        -------
-        list[str]
-            The *top_n* most relevant paragraphs.
-        """
-        if not paragraphs:
-            return []
-        if len(paragraphs) <= top_n:
-            return paragraphs
-
-        self._ensure_model()
-
-        # Encode query
-        query_emb = self._encode_text(query)
-
-        # Encode all paragraphs
-        para_embs = self._encode_text(paragraphs)
-
-        # Cosine similarity (embeddings are already normalised)
-        similarities = (para_embs @ query_emb.T).squeeze(-1)  # (N,)
-
-        # Top-n indices
-        top_indices = similarities.argsort(descending=True)[:top_n].tolist()
-        return [paragraphs[i] for i in top_indices]
-
-    def _encode_text(self, texts: str | list[str]) -> torch.Tensor:
-        """Encode one or more text strings into normalised embeddings.
-
-        Returns a ``(N, D)`` float16 tensor on ``self.device``.
-        """
-        if isinstance(texts, str):
-            texts = [texts]
-
-        # Tokenize with truncation to model max length
-        tokens = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=77,
-            return_tensors="pt",
-        ).to(self.device)
-
-        with torch.no_grad():
-            text_features = self.embedding_model.encode_text(
-                tokens["input_ids"], attention_mask=tokens.get("attention_mask")
-            )
-
-        text_features = F.normalize(text_features, dim=-1)
-        return text_features

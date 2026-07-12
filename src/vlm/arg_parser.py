@@ -30,12 +30,6 @@ def parse_args():
         help="Skip paragraph reranking; use the first --rerank-top-n paragraphs directly.",
     )
     parser.add_argument(
-        "--reranker",
-        choices=["clip", "cross"],
-        default="clip",
-        help="Paragraph reranker: 'clip' (EVA-CLIP bi-encoder) or 'cross' (cross-encoder).",
-    )
-    parser.add_argument(
         "--debug-samples",
         type=int,
         default=3,

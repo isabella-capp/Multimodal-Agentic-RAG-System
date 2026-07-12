@@ -108,12 +108,8 @@ def build_context(
 
     if no_rerank:
         top_paragraphs = pooled if rerank_top_n <= 0 else pooled[:rerank_top_n]
-    elif reranker is not None:
-        top_paragraphs = reranker.rerank(question, pooled, top_n=rerank_top_n)
     else:
-        top_paragraphs = retriever.rerank_paragraphs(
-            question, pooled, top_n=rerank_top_n
-        )
+        top_paragraphs = reranker.rerank(question, pooled, top_n=rerank_top_n)
 
     retrieved_context = {
         "wiki_url": results[0]["wiki_url"],
@@ -175,8 +171,7 @@ def main():
 
     retriever = kb = reranker = None
     if args.use_retrieval:
-        use_cross = not args.no_rerank and args.reranker == "cross"
-        retriever, kb, reranker = setup_retrieval(args.top_k, use_cross)
+        retriever, kb, reranker = setup_retrieval(args.top_k, not args.no_rerank)
 
     debug_count = 0
 
@@ -212,7 +207,9 @@ def main():
                 except Exception as e:
                     tqdm.write(f"retrieval failed for {item['unique_id']}: {e}")
 
-            prediction = model.generate_response(image_path, prompt)
+            prediction = model.generate_response(
+                image_path, prompt, system_prompt=SYSTEM_PROMPT
+            )
 
             if debug_count < args.debug_samples:
                 print_debug_example(item, retrieved_context, top_paragraphs, prediction)
