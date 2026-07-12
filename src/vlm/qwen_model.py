@@ -22,12 +22,8 @@ class QwenVQAModel:
         print("Model loaded.")
 
     @torch.inference_mode()
-    def generate_response(self, image_path_or_url, prompt_text, system_prompt=None):
+    def generate_response(self, image_path_or_url, prompt_text):
         messages = []
-        if system_prompt is not None:
-            messages.append(
-                {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
-            )
         messages.append(
             {
                 "role": "user",
