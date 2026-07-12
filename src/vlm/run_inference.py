@@ -33,6 +33,12 @@ MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
 CROSS_ENCODER_MODEL = "BAAI/bge-reranker-base"
 RETRIEVER_DEVICE = "cuda"
 
+SYSTEM_PROMPT = (
+    "You are a visual question answering assistant for encyclopedic questions about "
+    "the entity shown in the image. Reply with a short, direct answer — a single word, "
+    "entity name, or brief phrase — with no explanation and no full sentences."
+)
+
 
 def load_done_ids(path):
     if not os.path.exists(path):
@@ -62,10 +68,9 @@ def write_record(out, record):
 def build_rag_prompt(question, paragraphs):
     context = "\n\n".join(paragraphs)
     return (
-        f"Answer the question concisely based on the provided image and the following context. "
-        f"Strictly use only the information provided in the context or visible in the image.\n\n"
-        f"--- CONTEXT ---\n{context}\n\n"
-        f"--- QUESTION ---\n{question}\n\n"
+        f"{question}\n\n"
+        f"The following paragraphs may contain useful information to help answer "
+        f"the question correctly:\n\n{context}\n\n"
     )
 
 
