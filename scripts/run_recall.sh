@@ -23,8 +23,8 @@ export PYTHONUNBUFFERED=1
 unset SSL_CERT_DIR
 
 cd "$PROJECT_DIR"
-mkdir -p logs outputs
+mkdir -p logs outputs/retrieval
 
 uv run python src/retrieval/compute_recall.py \
-    --output outputs/retrieval_topk50.jsonl \
+    --output outputs/retrieval/retrieval_topk50.jsonl \
     --top-k 50
