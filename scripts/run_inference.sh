@@ -28,7 +28,6 @@ mkdir -p logs outputs
 uv run python src/vlm/run_inference.py \
     --output outputs/predictions_B5.jsonl \
     --use-retrieval \
-    --top-k 50 \
+    --top-k 20 \
     --rerank-top-n 20 \
-    --reranker cross \
     --debug-samples 3
