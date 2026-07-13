@@ -47,10 +47,6 @@ class Retriever:
         self.processor = None
         self.embedding_model = None
 
-    # ------------------------------------------------------------------
-    # Lazy loading helpers
-    # ------------------------------------------------------------------
-
     def _ensure_index(self):
         """Load the FAISS index and its JSON mapping (once)."""
         if self.img_index is not None:
@@ -67,7 +63,6 @@ class Retriever:
         if self.embedding_model is not None:
             return
 
-        # Always use float16 to keep RAM usage manageable (~16 GB vs ~32 GB)
         self._model_dtype = torch.float16
 
         print("Loading EVA-CLIP embedding model …")
@@ -84,10 +79,6 @@ class Retriever:
             .eval()
         )
 
-        # The `position_ids` buffers are non-persistent (not in the checkpoint)
-        # and end up as uninitialized memory under meta-device / low_cpu_mem_usage
-        # loading, causing out-of-range vision/text position embedding lookups.
-        # Re-materialize them as a proper arange on the target device.
         for emb in (
             self.embedding_model.vision_model.embeddings,
             self.embedding_model.text_model.embeddings,
@@ -95,11 +86,6 @@ class Retriever:
             n = emb.position_embedding.num_embeddings
             emb.position_ids = torch.arange(n, device=self.device).expand((1, -1))
         print(f"EVA-CLIP model loaded on {self.device} ({self._model_dtype}).")
-
-
-    # ------------------------------------------------------------------
-    # Core methods
-    # ------------------------------------------------------------------
 
     def encode_image(self, image: Image.Image) -> np.ndarray:
         """Encode an image into a normalised embedding vector.
