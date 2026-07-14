@@ -73,7 +73,7 @@ def parse_args():
         "--img-index-json-path", default=f"{BASE_FOLDER}/knn.json"
     )
     p.add_argument(
-        "--kb-path", default=f"{BASE_FOLDER}/encyclopedic_kb_wiki.json"
+        "--kb-path", default=f"{BASE_FOLDER}/encyclopedic_kb_wiki.db"
     )
     p.add_argument("--retriever-device", default="cuda")
 
