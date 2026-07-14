@@ -16,7 +16,7 @@ REACT_PROMPT_TEMPLATE = """\
 You are an expert visual question-answering assistant.
 You are shown an image and asked a question about it.
 
-You have access to the following tool:
+You have access to the following tools:
 
 {tools}
 
@@ -27,7 +27,7 @@ Thought: reason about what information you need
 Action: the action to take, must be one of [{tool_names}]
 Action Input: the input to the action
 Observation: the result of the action
-... (this Thought/Action/Action Input/Observation cycle can repeat up to {max_iterations} times)
+... (this Thought/Action/Action Input/Observation cycle can repeat)
 Thought: I now know the final answer
 Final Answer: the final answer to the original question
 
@@ -41,9 +41,10 @@ Important rules:
 Begin!
 
 Question: {input}
-Thought: {agent_scratchpad}"""
+Thought:{agent_scratchpad}"""
 
 REACT_PROMPT = PromptTemplate(
-    input_variables=["tools", "tool_names", "input", "agent_scratchpad", "max_iterations"],
+    input_variables=["tools", "tool_names", "input", "agent_scratchpad"],
     template=REACT_PROMPT_TEMPLATE,
 )
+

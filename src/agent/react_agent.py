@@ -167,10 +167,7 @@ class MultimodalReActAgent:
 
         # Run the agent
         try:
-            result = executor.invoke({
-                "input": question,
-                "max_iterations": str(self.max_iterations),
-            })
+            result = executor.invoke({"input": question})
             prediction = result.get("output", "")
             intermediate_steps = result.get("intermediate_steps", [])
         except Exception as e:
