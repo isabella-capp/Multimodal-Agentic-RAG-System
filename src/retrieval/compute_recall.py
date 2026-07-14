@@ -33,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Top-k retrieval dump for recall@k")
     parser.add_argument("--json-path", default=f"{BASE_FOLDER}/encyclopedic_test_subset.json")
     parser.add_argument("--base-folder", default=BASE_FOLDER)
-    parser.add_argument("--output", default="outputs/retrieval_topk50.jsonl")
+    parser.add_argument("--output", default="outputs/retrieval/retrieval_topk50.jsonl")
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--img-index-path", default=f"{BASE_FOLDER}/knn.index")
     parser.add_argument("--img-index-json-path", default=f"{BASE_FOLDER}/knn.json")

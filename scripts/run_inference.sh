@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=gpu_A40_45G|gpu_L40S_45G
-#SBATCH --mem=128G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=12:00:00
 #SBATCH --output=/homes/%u/cvcs2026/logs/inference_%j.out
@@ -29,6 +29,5 @@ uv run python src/vlm/run_inference.py \
     --output outputs/predictions_B5.jsonl \
     --use-retrieval \
     --top-k 20 \
-    --rerank-top-n 5 \
-    --reranker cross \
+    --rerank-top-n 20 \
     --debug-samples 3

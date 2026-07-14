@@ -16,3 +16,5 @@ logs/
 
 # Output di inferenza/valutazione (rigenerabili, non versionati)
 outputs/
+
+data/

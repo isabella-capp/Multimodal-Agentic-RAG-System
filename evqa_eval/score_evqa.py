@@ -22,6 +22,10 @@ from tqdm import tqdm
 
 import evaluation_utils
 
+OUTPUTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "outputs")
+DEFAULT_PREDICTIONS = os.path.join(OUTPUTS_DIR, "predictions.jsonl")
+DEFAULT_OUTPUT = os.path.join(OUTPUTS_DIR, "results.json")
+
 
 def read_predictions(path):
     with open(path, encoding="utf-8") as f:
@@ -40,10 +44,30 @@ def score_prediction(record, scoring_function):
     return scoring_function(example)
 
 
+def summarize(scores_by_type):
+    all_scores = [s for scores in scores_by_type.values() for s in scores]
+    overall = sum(all_scores) / len(all_scores) if all_scores else 0.0
+    return {
+        "num_examples": len(all_scores),
+        "accuracy_overall": overall,
+        "accuracy_by_type": {q: sum(s) / len(s) for q, s in scores_by_type.items()},
+    }
+
+
+def print_report(summary, scores_by_type):
+    print(
+        f"\nOverall accuracy: {summary['accuracy_overall']:.4f} "
+        f"(n={summary['num_examples']})"
+    )
+    for qtype in sorted(scores_by_type):
+        scores = scores_by_type[qtype]
+        print(f"  {qtype:15s}: {sum(scores) / len(scores):.4f} (n={len(scores)})")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Encyclopedic-VQA evaluation")
-    parser.add_argument("--predictions", default="../outputs/predictions.jsonl")
-    parser.add_argument("--output", default="../outputs/results.json")
+    parser.add_argument("--predictions", default=DEFAULT_PREDICTIONS)
+    parser.add_argument("--output", default=DEFAULT_OUTPUT)
     return parser.parse_args()
 
 
@@ -60,19 +84,9 @@ def main():
         score = score_prediction(record, scoring_function)
         scores_by_type[record["question_type"]].append(score)
 
-    all_scores = [s for scores in scores_by_type.values() for s in scores]
-    overall = sum(all_scores) / len(all_scores) if all_scores else 0.0
+    summary = summarize(scores_by_type)
+    print_report(summary, scores_by_type)
 
-    print(f"\nOverall accuracy: {overall:.4f} (n={len(all_scores)})")
-    for qtype in sorted(scores_by_type):
-        scores = scores_by_type[qtype]
-        print(f"  {qtype:15s}: {sum(scores) / len(scores):.4f} (n={len(scores)})")
-
-    summary = {
-        "num_examples": len(all_scores),
-        "accuracy_overall": overall,
-        "accuracy_by_type": {q: sum(s) / len(s) for q, s in scores_by_type.items()},
-    }
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     print(f"\nSummary written to {args.output}")
