@@ -240,6 +240,10 @@ def main():
             result = agent.run(image_path, item["question"])
             prediction = result["prediction"]
 
+            actual_paragraphs_used = sum(
+                str(obs).count("[Paragraph ") for _, obs in result.get("intermediate_steps", [])
+            )
+
             # Build retrieved_context metadata (compatible with baseline format)
             retrieved_context = None
             if result["faiss_results"]:
@@ -256,7 +260,7 @@ def main():
                         for r in result["faiss_results"]
                     ],
                     "num_paragraphs_total": result["num_paragraphs_pool"],
-                    "num_paragraphs_used": result["num_iterations"],
+                    "num_paragraphs_used": actual_paragraphs_used,
                     "agent_iterations": result["num_iterations"],
                     "agent_elapsed_seconds": result["elapsed_seconds"],
                 }

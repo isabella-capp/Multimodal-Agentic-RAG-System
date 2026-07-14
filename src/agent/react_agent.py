@@ -38,6 +38,20 @@ from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
 
 
+def _handle_parse_error(question: str):
+    def _inner(error) -> str:
+        return (
+            "Formatting error: your last response did not follow the required "
+            "Action / Action Input format. Do NOT give a Final Answer yet — "
+            "you have not retrieved any evidence. Retry now with the exact "
+            "format and use this query if you need a fallback:\n"
+            "Action: search_paragraphs\n"
+            f"Action Input: {question}"
+        )
+
+    return _inner
+
+
 class MultimodalReActAgent:
     """End-to-end multimodal agentic RAG system.
 
@@ -160,7 +174,7 @@ class MultimodalReActAgent:
             agent=agent,
             tools=[search_tool],
             max_iterations=self.max_iterations,
-            handle_parsing_errors=True,
+            handle_parsing_errors=_handle_parse_error(question),
             return_intermediate_steps=True,
             verbose=self.verbose,
         )
