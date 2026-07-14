@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.14.0",
     "faiss-cpu>=1.14.3",
+    "langchain>=0.3",
+    "langchain-community>=0.3",
     "matplotlib>=3.11.0",
     "numpy>=2.4.6",
     "pillow>=12.3.0",
