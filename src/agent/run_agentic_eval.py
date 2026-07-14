@@ -5,17 +5,6 @@ Base, Cross-Encoder reranker), then runs the ``MultimodalReActAgent`` over
 every example in the dataset.  Saves predictions in the same JSONL format
 used by the baselines so that ``evqa_eval/score_evqa.py`` can score them
 directly.
-
-Usage (SLURM)::
-
-    See scripts/run_agentic_eval.sh
-
-Usage (interactive)::
-
-    uv run python src/agent/run_agentic_eval.py \\
-        --json-path /path/to/test.json \\
-        --output outputs/predictions_agentic.jsonl \\
-        --top-k 20 --rerank-top-n 5 --max-iterations 3
 """
 
 import argparse
@@ -39,8 +28,6 @@ from agent.react_agent import MultimodalReActAgent
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
 
-
-# ── CLI ──────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(
@@ -123,8 +110,9 @@ def parse_args():
 
     return p.parse_args()
 
-
-# ── Helpers ──────────────────────────────────────────────────────────────
+#-----------------------------------------------
+# Helpers
+#-----------------------------------------------
 
 def load_done_ids(path):
     """Return set of unique_ids already present in the output file."""
@@ -133,10 +121,40 @@ def load_done_ids(path):
     with open(path, encoding="utf-8") as f:
         return {json.loads(line)["unique_id"] for line in f if line.strip()}
 
+def write_record(out, record):
+    out.write(json.dumps(record, ensure_ascii=False) + "\n")
+    out.flush()
 
-def _truncate(text: str, n: int = 200) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= n else text[:n] + " …"
+#----------------------------------------------
+# Debug printing
+#----------------------------------------------
+
+def print_debug_example(item, result, prediction):
+    tqdm.write(f"\n{'=' * 70}")
+    tqdm.write(
+        f"[DEBUG] {item['unique_id']}  ({item['question_type']})"
+    )
+    tqdm.write(f"Q : {item['question']}")
+    tqdm.write(f"GT: {item['answer']}")
+    tqdm.write(
+        f"Agent iterations: {result['num_iterations']}"
+    )
+    tqdm.write(
+        f"Paragraph pool: {result['num_paragraphs_pool']}"
+    )
+    for i, (action, obs) in enumerate(result["intermediate_steps"], 1): 
+        tqdm.write(
+            f"Step {i}: Action={action.tool}, "
+            f"Input={action.tool_input}"
+        )
+        tqdm.write(
+            f"Obs={str(obs)}"
+        )
+    tqdm.write(f"Prediction: {prediction}")
+    tqdm.write(
+        f"  Time: {result['elapsed_seconds']:.1f}s"
+    )
+    tqdm.write("=" * 70)
 
 
 # ── Main ─────────────────────────────────────────────────────────────────
@@ -144,9 +162,6 @@ def _truncate(text: str, n: int = 200) -> str:
 def main():
     args = parse_args()
 
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-
-    # ── Load dataset ─────────────────────────────────────────────────
     print(f"\n{'=' * 70}")
     print("Loading dataset …")
     dataset = load_dataset(args.json_path, args.base_folder)
@@ -154,18 +169,11 @@ def main():
         dataset = dataset[: args.limit]
     print(f"Dataset: {len(dataset)} examples")
 
-    qtypes = defaultdict(int)
-    for item in dataset:
-        qtypes[item["question_type"]] += 1
-    for qt in sorted(qtypes):
-        print(f"  {qt:20s}: {qtypes[qt]}")
-
-    # Resume support
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     done_ids = load_done_ids(args.output)
     if done_ids:
         print(f"Skipping {len(done_ids)} already-predicted examples")
 
-    # ── Load models (ONCE) ───────────────────────────────────────────
     print(f"\n{'=' * 70}")
     print("Loading Qwen VLM …")
     vlm = QwenVQAModel(model_name=args.model_name)
@@ -217,7 +225,7 @@ def main():
     debug_count = 0
 
     with open(args.output, "a", encoding="utf-8") as out:
-        for item in tqdm(dataset, desc="Agentic RAG"):
+        for item in tqdm(dataset, desc="Agentic RAG inference"):
             if item["unique_id"] in done_ids:
                 continue
 
@@ -225,13 +233,7 @@ def main():
 
             if not os.path.exists(image_path):
                 tqdm.write(f"missing image: {image_path}")
-                out.write(
-                    json.dumps(
-                        build_record(item, None), ensure_ascii=False
-                    )
-                    + "\n"
-                )
-                out.flush()
+                write_record(out, build_record(item, None))
                 continue
 
             # Run the agent
@@ -261,42 +263,12 @@ def main():
 
             # Debug output
             if debug_count < args.debug_samples:
-                tqdm.write(f"\n{'=' * 70}")
-                tqdm.write(
-                    f"[DEBUG] {item['unique_id']}  "
-                    f"({item['question_type']})"
-                )
-                tqdm.write(f"  Q : {item['question']}")
-                tqdm.write(f"  GT: {item['answer']}")
-                tqdm.write(
-                    f"  Agent iterations: {result['num_iterations']}"
-                )
-                tqdm.write(
-                    f"  Paragraph pool: {result['num_paragraphs_pool']}"
-                )
-                for i, (action, obs) in enumerate(
-                    result["intermediate_steps"], 1
-                ):
-                    tqdm.write(
-                        f"    Step {i}: Action={action.tool}, "
-                        f"Input={_truncate(action.tool_input, 80)}"
-                    )
-                    tqdm.write(
-                        f"            Obs={_truncate(str(obs), 120)}"
-                    )
-                tqdm.write(f"  Prediction: {prediction}")
-                tqdm.write(
-                    f"  Time: {result['elapsed_seconds']:.1f}s"
-                )
-                tqdm.write("=" * 70)
+                print_debug_example(item, result, prediction)
                 debug_count += 1
 
             # Save in baseline-compatible format
             record = build_record(item, prediction, retrieved_context)
-            out.write(
-                json.dumps(record, ensure_ascii=False) + "\n"
-            )
-            out.flush()
+            write_record(out, record)
 
     print(f"\nDone. Predictions saved to {args.output}")
     print(
