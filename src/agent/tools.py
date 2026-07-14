@@ -9,7 +9,7 @@ receive pre-initialised objects via closures.
 
 from __future__ import annotations
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 from retrieval.reranker import CrossEncoderReranker
 

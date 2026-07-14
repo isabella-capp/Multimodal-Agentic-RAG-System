@@ -6,7 +6,7 @@ The system prompt instructs the VLM (Qwen) on:
 * How to produce a concise, grounded final answer.
 """
 
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 # ------------------------------------------------------------------ #
 # ReAct system prompt                                                  #

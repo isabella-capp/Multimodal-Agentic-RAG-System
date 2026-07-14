@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from langchain.llms.base import LLM
+from langchain_core.language_models.llms import LLM
 from pydantic import Field, ConfigDict
 
 

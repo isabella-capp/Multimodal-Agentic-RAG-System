@@ -28,7 +28,7 @@ import time
 from typing import Any
 
 from PIL import Image
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain_classic.agents import AgentExecutor, create_react_agent
 
 from agent.qwen_langchain import QwenLangChainLLM
 from agent.tools import make_search_tool
