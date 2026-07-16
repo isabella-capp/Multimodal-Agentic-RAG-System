@@ -1,12 +1,3 @@
-"""LangChain tools for the Multimodal Agentic RAG pipeline.
-
-Each tool wraps an existing component (e.g. ``CrossEncoderReranker``) and
-exposes it to the ReAct agent through LangChain's ``@tool`` decorator.
-
-No existing source files in ``src/retrieval/`` are modified — the tools
-receive pre-initialised objects via closures.
-"""
-
 from __future__ import annotations
 
 from langchain_core.tools import tool

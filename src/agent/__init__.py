@@ -1,1 +1,1 @@
-# src/agent — Multimodal Agentic RAG (LangChain ReAct)
+# src/agent — Multimodal Agentic RAG (vLLM + LangGraph tool-calling)
