@@ -307,9 +307,13 @@ def initialize_bem_scoring_function(vocab_path=_VOCAB_PATH,
   # 3 - Define preprocessing functions.
   def preprocess_example(example):
     """Prepare example for BEM."""
+    # BEM's BERT caps at 512 tokens; a verbose model answer can blow past it, so
+    # cap the candidate string (real VQA answers are short) to keep the
+    # reference and question intact.
+    candidate_text = (example['candidate'] or '')[:600]
     question = tokenizer.tokenize(example['question']).merge_dims(1, 2)
     reference = tokenizer.tokenize(example['reference']).merge_dims(1, 2)
-    candidate = tokenizer.tokenize(example['candidate']).merge_dims(1, 2)
+    candidate = tokenizer.tokenize(candidate_text).merge_dims(1, 2)
 
     input_ids, segment_ids = text.combine_segments(
         (candidate, reference, question), cls_id, sep_id)
@@ -317,6 +321,7 @@ def initialize_bem_scoring_function(vocab_path=_VOCAB_PATH,
     return {'input_ids': input_ids.numpy(), 'segment_ids': segment_ids.numpy()}
 
   def pad(a, length=512):
+    a = a.reshape(-1)[:length]  # truncate over-length inputs instead of crashing
     return np.append(a, np.zeros(length - a.shape[-1], np.int32))
 
   def bertify_examples(examples):
