@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import faiss
 import json
 import numpy as np
-from transformers import CLIPImageProcessor, AutoModel
+from transformers import CLIPImageProcessor, CLIPTokenizer, AutoModel
 from PIL import Image
 
 
@@ -69,6 +69,9 @@ class Retriever:
         self.processor = CLIPImageProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
         )
+        self.text_tokenizer = CLIPTokenizer.from_pretrained(
+            "openai/clip-vit-large-patch14"
+        )
         self.embedding_model = (
             AutoModel.from_pretrained(
                 "BAAI/EVA-CLIP-8B",
@@ -103,6 +106,26 @@ class Retriever:
 
         image_features = F.normalize(image_features, dim=-1)
         return image_features.cpu().numpy().astype(np.float32)
+
+    def encode_text(self, query: str) -> np.ndarray:
+        """Encode a text query into the shared CLIP space (a ``(1, D)`` array)."""
+        self._ensure_model()
+
+        tokens = self.text_tokenizer(
+            [query],
+            padding="max_length",
+            max_length=77,
+            truncation=True,
+            return_tensors="pt",
+        ).to(self.device)
+
+        with torch.no_grad():
+            text_features = self.embedding_model.encode_text(
+                input_ids=tokens.input_ids, attention_mask=tokens.attention_mask
+            )
+
+        text_features = F.normalize(text_features, dim=-1)
+        return text_features.cpu().numpy().astype(np.float32)
 
     def retrieve_top_k(self, image: Image.Image):
         """Search FAISS using an image and return metadata + scores.
@@ -159,3 +182,43 @@ class Retriever:
             results.append({**res, "score": score})
 
         return results
+
+    def search_index(self, embedding: np.ndarray, top_k: int = 10) -> list[dict]:
+        """Search FAISS with a normalised ``(1, D)`` embedding.
+
+        Returns candidate articles (deduplicated by ``wiki_url``), each with
+        ``wiki_url``, ``title``, ``image_path`` and ``score``.
+        """
+        self._ensure_index()
+
+        distances, indices = self.img_index.search(embedding, k=top_k)
+
+        results = []
+        seen = set()
+        for idx, score in zip(indices[0], distances[0].tolist()):
+            if idx == -1 or idx >= len(self.img_values):
+                continue
+            data = self.img_values[idx]
+            wiki_url = data[0]
+            if wiki_url in seen:
+                continue
+            seen.add(wiki_url)
+            results.append(
+                {"wiki_url": wiki_url, "title": data[1], "image_path": data[2], "score": score}
+            )
+        return results
+
+    def retrieve_by_text(self, query: str, top_k: int = 10) -> list[dict]:
+        """Cross-modal retrieval: text query → shared CLIP space → image index."""
+        return self.search_index(self.encode_text(query), top_k)
+
+    def retrieve_by_fusion(
+        self, image: Image.Image, query: str, alpha: float = 0.6, top_k: int = 10
+    ) -> list[dict]:
+        """Query-conditioned retrieval: fuse image + text embeddings, then search.
+
+        ``alpha`` weights the image (1.0 = image only, 0.0 = text only).
+        """
+        fused = alpha * self.encode_image(image) + (1 - alpha) * self.encode_text(query)
+        fused = fused / np.linalg.norm(fused, axis=-1, keepdims=True)
+        return self.search_index(fused.astype(np.float32), top_k)
