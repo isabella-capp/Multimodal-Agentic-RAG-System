@@ -9,8 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
-# Logs
-logs/
+# Logs (keep the dir for SLURM, ignore its contents)
+logs/*
+!logs/.gitkeep
 *.out
 *.err
 
