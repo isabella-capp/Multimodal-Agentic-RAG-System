@@ -27,11 +27,15 @@ class EvalConfig(BaseModel):
     kb_path: str = f"{BASE_FOLDER}/encyclopedic_kb_wiki.db"
     retriever_device: str = "cuda"
     cross_encoder_model: str = "BAAI/bge-reranker-base"
+    ef_search: int = 256  # HNSW search depth; low default (~16) under-retrieves
 
     # Agent
+    pipeline: str = "research"  # "research" (retrieve→extract sub-agent) or "search"
     top_k: int = 20
     rerank_top_n: int = 5
-    max_iterations: int = 3
+    max_iterations: int = 6  # recursion_limit = 2*this+1; 3 was too few (many hit it)
+    research_pool_articles: int = 50   # cross-encoder refine pool (recall@50 ≈ 47%)
+    research_extractor_articles: int = 20  # LLM extractor reads only the top 20
 
     # Debug / limits
     debug_samples: int = 3
@@ -58,6 +62,7 @@ class EvalConfig(BaseModel):
         p.add_argument("--kb-path", default=d.kb_path)
         p.add_argument("--retriever-device", default=d.retriever_device)
         p.add_argument("--cross-encoder-model", default=d.cross_encoder_model)
+        p.add_argument("--pipeline", choices=["research", "search"], default=d.pipeline)
         p.add_argument("--top-k", type=int, default=d.top_k)
         p.add_argument("--rerank-top-n", type=int, default=d.rerank_top_n)
         p.add_argument("--max-iterations", type=int, default=d.max_iterations)

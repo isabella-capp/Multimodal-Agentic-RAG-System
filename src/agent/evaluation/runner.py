@@ -14,13 +14,13 @@ from retrieval.reranker import CrossEncoderReranker
 from vlm.qwen_model import load_dataset
 from vlm.run_inference import build_record
 from agent.rag import AgenticRAG
-from agent.schemas import AgentRun, RetrievedContext
+from agent.schemas import AgentRun
 from agent.evaluation.config import EvalConfig
 from agent.evaluation.metrics import MetricsCollector
 
 
-def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
-    """Load the retrieval stack + vLLM chat client and wire up the agent."""
+def load_stack(config: EvalConfig, logger: logging.Logger):
+    """Load the vLLM chat client + retrieval stack once (reusable across agents)."""
     logger.info("Connecting to vLLM at %s (model %s)", config.vllm_base_url, config.model_name)
     llm = ChatOpenAI(
         model=config.model_name,
@@ -36,6 +36,7 @@ def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
         img_index_json_path=config.img_index_json_path,
         top_k=config.top_k,
         device=config.retriever_device,
+        ef_search=config.ef_search,
     )
     retriever._ensure_index()
     retriever._ensure_model()
@@ -46,6 +47,12 @@ def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
     logger.info("Loading Cross-Encoder reranker …")
     reranker = CrossEncoderReranker(config.cross_encoder_model, device=config.retriever_device)
 
+    return llm, retriever, kb, reranker
+
+
+def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
+    """Load the retrieval stack + vLLM chat client and wire up the agent."""
+    llm, retriever, kb, reranker = load_stack(config, logger)
     return AgenticRAG(
         retriever=retriever,
         kb=kb,
@@ -54,6 +61,9 @@ def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
         logger=logger,
         top_n=config.rerank_top_n,
         max_iterations=config.max_iterations,
+        pipeline=config.pipeline,
+        research_pool_articles=config.research_pool_articles,
+        research_extractor_articles=config.research_extractor_articles,
     )
 
 
@@ -118,29 +128,8 @@ class AgenticEvaluator:
             return item, None
         return item, self.agent.run(image_path=item["image_path"], question=item["question"])
 
-    @staticmethod
-    def _retrieved_context(run: AgentRun) -> RetrievedContext | None:
-        if not run.articles:
-            return None
-        top = run.articles[0]
-        return RetrievedContext(
-            wiki_url=top.wiki_url,
-            title=top.title,
-            score=top.score,
-            candidates=run.articles,
-            num_paragraphs_total=run.num_paragraphs_pool,
-            num_paragraphs_used=run.paragraphs_used,
-            agent_tool_calls=run.num_tool_calls,
-            agent_elapsed_seconds=run.elapsed_seconds,
-        )
-
     def _record(self, item: dict, run: AgentRun) -> dict:
-        ctx = self._retrieved_context(run)
-        record = build_record(
-            item=item,
-            prediction=run.prediction,
-            retrieved_context=ctx.model_dump() if ctx else None,
-        )
+        record = build_record(item=item, prediction=run.prediction)
         record["agent"] = {
             "tool_called": run.tool_called,
             "num_tool_calls": run.num_tool_calls,

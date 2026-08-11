@@ -3,13 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
-from pydantic import BaseModel, Field, computed_field
-
-from agent.schemas.retrieval import ArticleHit
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class AgentStep(BaseModel):
-    """One tool invocation in the agent loop (a `search_paragraphs` call)."""
+    """One tool invocation in the agent loop (a retrieval tool call)."""
 
     order: int  # 1-based position in the loop — the "when"
     tool: str
@@ -20,21 +18,17 @@ class AgentStep(BaseModel):
 class AgentRun(BaseModel):
     """Full result + metrics of running the agent on one example."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     prediction: str | None = None
     steps: list[AgentStep] = Field(default_factory=list)
-    articles: list[ArticleHit] = Field(default_factory=list)
-    num_paragraphs_pool: int = 0
     elapsed_seconds: float = 0.0
     error: str | None = None
+    # Raw LangGraph messages, kept only for tracing; never serialised.
+    raw: list[Any] = Field(default_factory=list, exclude=True, repr=False)
 
     @classmethod
-    def from_messages(
-        cls,
-        messages: list,
-        *,
-        articles: list[ArticleHit],
-        num_paragraphs_pool: int,
-    ) -> "AgentRun":
+    def from_messages(cls, messages: list) -> "AgentRun":
         """Build a run from a LangGraph ``{"messages": [...]}`` result.
 
         Pairs each tool call with its observation (by ``tool_call_id``) into an
@@ -66,12 +60,7 @@ class AgentRun(BaseModel):
                 prediction = m.content if isinstance(m.content, str) else str(m.content)
                 break
 
-        return cls(
-            prediction=prediction,
-            steps=steps,
-            articles=articles,
-            num_paragraphs_pool=num_paragraphs_pool,
-        )
+        return cls(prediction=prediction, steps=steps)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

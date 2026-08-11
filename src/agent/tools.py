@@ -1,55 +1,44 @@
 from __future__ import annotations
 
 from langchain_core.tools import tool
+from PIL import Image
 
-from retrieval.reranker import CrossEncoderReranker
+from agent.protocols import KnowledgeBase, Reranker, Retriever
 
 
-def make_search_tool(
-    reranker: CrossEncoderReranker,
-    paragraph_pool: list[str],
-    top_n: int,
-):
-    """Create a ``search_paragraphs`` tool bound to a fixed paragraph pool.
+def _format(paragraphs: list[str]) -> str:
+    return "\n\n".join(f"[Paragraph {i + 1}] {p}" for i, p in enumerate(paragraphs))
 
-    Parameters
-    ----------
-    reranker : CrossEncoderReranker
-        The cross-encoder reranker (already loaded).
-    paragraph_pool : list[str]
-        All paragraphs extracted from the FAISS top-k articles for this
-        query.  This list is **fixed** for the lifetime of a single agent
-        session — the agent cannot change it.
-    top_n : int
-        Number of paragraphs to return per tool invocation (the optimal
-        value found during the ablation study).
+
+def build_tools(retriever: Retriever, kb: KnowledgeBase, reranker: Reranker,
+                image: Image.Image, top_n: int = 5):
+    """On-demand image-grounded retrieval tool bound to the query image.
+
+    The visual candidate pool is memoised (the image never changes); the tool
+    reranks it by the agent's query and returns the top paragraphs. The text-side
+    channel was removed: the cross-modal text→image path is broken (misaligned
+    encode_text) and never returned relevant articles.
     """
+    visual: dict = {}
+
+    def _visual_pool() -> list[str]:
+        if "pool" not in visual:
+            articles = retriever.retrieve(image=image, question=None)
+            visual["pool"] = [
+                p for a in articles for p in kb.get_paragraphs_by_url(wiki_url=a["wiki_url"])
+            ]
+        return visual["pool"]
 
     @tool
-    def search_paragraphs(query: str) -> str:
-        """Search the knowledge base for paragraphs relevant to a query.
+    def search_by_image(query: str) -> str:
+        """Retrieve facts from Wikipedia articles that match the IMAGE, ranked by your query.
 
-        Use this tool when you need factual information to answer the
-        user's question about the image.  You can rephrase or refine
-        your query to find different paragraphs each time.
-
-        Args:
-            query: A natural-language search query describing what
-                   information you are looking for.
+        Use this first — it grounds on the entity actually shown in the image.
         """
-        if not paragraph_pool:
-            return "No paragraphs available in the knowledge base for this image."
+        pool = _visual_pool()
+        if not pool:
+            return "No articles found for this image."
+        results = reranker.rerank(query, pool, top_n=top_n)
+        return _format(results) if results else "No relevant paragraphs found."
 
-        results = reranker.rerank(query, paragraph_pool, top_n=top_n)
-
-        if not results:
-            return "No relevant paragraphs found for this query."
-
-        formatted = "\n\n".join(
-            f"[Paragraph {i + 1}] {p}" for i, p in enumerate(results)
-        )
-        return (
-            f"Found {len(results)} relevant paragraphs:\n\n{formatted}"
-        )
-
-    return search_paragraphs
+    return [search_by_image]
