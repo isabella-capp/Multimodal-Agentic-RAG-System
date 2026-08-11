@@ -41,6 +41,9 @@ export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
 export VLLM_USE_FLASHINFER_SAMPLER=0
 export PATH="$HOME/.local/bin:$PATH"
+
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/$USER/.uv_cache}"
+mkdir -p "$UV_CACHE_DIR"
 unset SSL_CERT_DIR
 cd "$PROJECT_DIR"
 mkdir -p logs outputs/agentic
@@ -48,7 +51,7 @@ mkdir -p logs outputs/agentic
 # Build the isolated vLLM venv on first use (kept on /homes; /work is too slow).
 if [ ! -x "$VENV/bin/vllm" ]; then
     echo "Creating vLLM venv at $VENV ..."
-    uv venv "$VENV" --python 3.12
+    uv venv "$VENV" --python 3.12 --clear
     uv pip install --python "$VENV/bin/python" "vllm==0.25.1"
 fi
 
