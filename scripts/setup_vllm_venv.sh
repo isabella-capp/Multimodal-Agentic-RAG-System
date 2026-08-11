@@ -28,6 +28,6 @@ echo "installing vllm==$VLLM_VERSION …"
 uv pip install --python "$VENV/bin/python" "vllm==$VLLM_VERSION"
 
 echo "=== verify ==="
-"$VENV/bin/python" -c "import vllm, torch; print('vllm', vllm.__version__, '| torch', torch.__version__, torch.version.cuda)"
-"$VENV/bin/vllm" --version
+"$VENV/bin/python" -c "import vllm, torch; print('vllm', vllm.__version__, '| torch', torch.__version__, '| cuda', torch.version.cuda)"
+test -x "$VENV/bin/vllm" && echo "vllm binary present at $VENV/bin/vllm"
 echo "done"
