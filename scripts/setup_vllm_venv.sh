@@ -19,7 +19,7 @@ VENV="/homes/$USER/vllm_venv"
 VLLM_VERSION=0.25.1
 
 echo "creating venv at $VENV (python 3.12) …"
-uv venv "$VENV" --python 3.12
+uv venv "$VENV" --python 3.12 --clear
 
 echo "installing vllm==$VLLM_VERSION …"
 uv pip install --python "$VENV/bin/python" "vllm==$VLLM_VERSION"
