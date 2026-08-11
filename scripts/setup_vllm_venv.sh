@@ -15,7 +15,7 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 unset SSL_CERT_DIR
 
-export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/$USER/.uv_cache}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/recursive_retrievers/$USER/.uv_cache}"
 mkdir -p "$UV_CACHE_DIR"
 
 VENV="/homes/$USER/vllm_venv"

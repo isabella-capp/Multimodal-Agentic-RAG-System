@@ -42,7 +42,7 @@ export PYTHONUNBUFFERED=1
 export VLLM_USE_FLASHINFER_SAMPLER=0
 export PATH="$HOME/.local/bin:$PATH"
 
-export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/$USER/.uv_cache}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/recursive_retrievers/$USER/.uv_cache}"
 mkdir -p "$UV_CACHE_DIR"
 unset SSL_CERT_DIR
 cd "$PROJECT_DIR"
