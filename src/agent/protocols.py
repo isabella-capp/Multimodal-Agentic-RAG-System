@@ -21,10 +21,14 @@ class Retriever(Protocol):
 
 
 class KnowledgeBase(Protocol):
-    """Read-only access to article paragraphs."""
+    """Read-only access to articles, their paragraphs, and name lookup."""
 
     def get_paragraphs_by_url(self, wiki_url: str) -> list[str]:
         """Return the section paragraphs for a Wikipedia URL, in order."""
+        ...
+
+    def lookup_articles(self, name: str, limit: int = 5) -> list[dict]:
+        """Articles whose title matches ``name`` (exact/alias, then fuzzy)."""
         ...
 
 

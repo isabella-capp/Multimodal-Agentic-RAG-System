@@ -21,11 +21,11 @@ from agent.evaluation.metrics import MetricsCollector
 
 def load_stack(config: EvalConfig, logger: logging.Logger):
     """Load the vLLM chat client + retrieval stack once (reusable across agents)."""
-    logger.info("Connecting to vLLM at %s (model %s)", config.vllm_base_url, config.model_name)
+    logger.info("Connecting to %s (model %s)", config.base_url, config.model_name)
     llm = ChatOpenAI(
         model=config.model_name,
-        base_url=config.vllm_base_url,
-        api_key="EMPTY",
+        base_url=config.base_url,
+        api_key=os.getenv("LLM_API_KEY", "EMPTY"),
         max_tokens=config.max_tokens,
         temperature=0.0,
     )
@@ -51,7 +51,7 @@ def load_stack(config: EvalConfig, logger: logging.Logger):
 
 
 def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
-    """Load the retrieval stack + vLLM chat client and wire up the agent."""
+    """Load the retrieval stack + chat client and wire up the agent."""
     llm, retriever, kb, reranker = load_stack(config, logger)
     return AgenticRAG(
         retriever=retriever,
@@ -60,10 +60,9 @@ def build_agent(config: EvalConfig, logger: logging.Logger) -> AgenticRAG:
         llm=llm,
         logger=logger,
         top_n=config.rerank_top_n,
+        top_k=config.top_k,
         max_iterations=config.max_iterations,
-        pipeline=config.pipeline,
-        research_pool_articles=config.research_pool_articles,
-        research_extractor_articles=config.research_extractor_articles,
+        force_first_tool=config.force_first_tool,
     )
 
 
@@ -140,7 +139,9 @@ class AgenticEvaluator:
                     "order": s.order,
                     "tool": s.tool,
                     "arguments": s.arguments,
-                    "num_paragraphs": s.observation.count("[Paragraph "),
+                    "miss": s.miss,
+                    "num_articles": s.num_articles,
+                    "num_paragraphs": s.num_paragraphs,
                 }
                 for s in run.steps
             ],
