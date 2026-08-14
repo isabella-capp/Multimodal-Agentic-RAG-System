@@ -35,6 +35,21 @@ def _make_force_first(tool_name: str | None = None):
     return middleware
 
 
+def _make_force_always_tool():
+    """Middleware that forces a tool call on EVERY model turn.
+
+    The model can NEVER reply in free text: it must call either a retrieval
+    tool or ``submit_final_answer``. This eliminates the implicit exit path
+    that caused the agent to stop after the first forced retrieval.
+    """
+    @wrap_model_call
+    def middleware(request, handler):
+        request = request.override(tool_choice="required")
+        return handler(request)
+
+    return middleware
+
+
 class AgenticRAG:
     """Runs the agentic RAG loop for one example at a time.
 
@@ -67,6 +82,8 @@ class AgenticRAG:
         t0 = time.time()
         image = Image.open(image_path).convert("RGB")
         if self.pipeline == "research":
+            if self._extractor is None:
+                raise RuntimeError("Research pipeline requires an EvidenceExtractor")
             articles = gather_candidates(self.retriever, image, self.research_pool_articles)
             data_uri = image_to_data_uri(image_path)
             tools = build_research_tools(self._extractor, self.reranker, self.kb, data_uri,
@@ -77,7 +94,7 @@ class AgenticRAG:
         else:
             tools = build_tools(self.retriever, self.kb, self.reranker, image, top_n=self.top_n)
             system_prompt = SYSTEM_PROMPT
-            middleware = [_make_force_first()] if self.force_first_tool else []
+            middleware = [_make_force_always_tool()] if self.force_first_tool else [_make_force_first()]
         agent = create_agent(model=self.llm, tools=tools, system_prompt=system_prompt,
                              middleware=middleware)
 

@@ -30,7 +30,7 @@ class EvalConfig(BaseModel):
     ef_search: int = 256  # HNSW search depth; low default (~16) under-retrieves
 
     # Agent
-    pipeline: str = "research"  # "research" (retrieve→extract sub-agent) or "search"
+    pipeline: str = "search"  # "research" (retrieve→extract sub-agent) or "search"
     top_k: int = 20
     rerank_top_n: int = 5
     max_iterations: int = 6  # recursion_limit = 2*this+1; 3 was too few (many hit it)

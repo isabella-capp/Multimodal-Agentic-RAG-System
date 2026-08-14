@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from distro import name
 from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -32,33 +33,52 @@ class AgentRun(BaseModel):
         """Build a run from a LangGraph ``{"messages": [...]}`` result.
 
         Pairs each tool call with its observation (by ``tool_call_id``) into an
-        ordered list of steps, and takes the last non-tool assistant message as
-        the prediction.
+        ordered list of steps.
+
+        When the search pipeline uses ``submit_final_answer``, the prediction is
+        extracted from the ``__FINAL__:`` sentinel inside the ToolMessage.  The
+        submit call itself is excluded from the retrieval ``steps`` list.
         """
         calls: dict[str, tuple[str, dict]] = {}
         for m in messages:
             if isinstance(m, AIMessage):
                 for tc in m.tool_calls or []:
-                    calls[tc["id"]] = (tc["name"], tc.get("args", {}))
+                    tool_call_id = tc.get("id")
+                    if tool_call_id is None:
+                        continue
+
+                    calls[tool_call_id] = (tc["name"], tc.get("args", {}))
 
         steps: list[AgentStep] = []
+        prediction: str | None = None
+
         for m in messages:
             if isinstance(m, ToolMessage):
                 name, args = calls.get(m.tool_call_id, (m.name, {}))
+
+                if name is None:
+                    continue
+
+                obs = str(m.content)
+                # Detect the submit_final_answer sentinel.
+                if name == "submit_final_answer" and obs.startswith("__FINAL__:"):
+                    prediction = obs[len("__FINAL__:"):]
+                    # Do NOT add this as a retrieval step.
+                    continue
                 steps.append(
                     AgentStep(
                         order=len(steps) + 1,
                         tool=name,
                         arguments=args,
-                        observation=str(m.content),
+                        observation=obs,
                     )
                 )
-
-        prediction: str | None = None
-        for m in reversed(messages):
-            if isinstance(m, AIMessage) and not m.tool_calls:
-                prediction = m.content if isinstance(m.content, str) else str(m.content)
-                break
+        
+        if prediction is None:
+            for m in reversed(messages):
+                if isinstance(m, AIMessage) and not m.tool_calls:
+                    prediction = m.content if isinstance(m.content, str) else str(m.content)
+                    break
 
         return cls(prediction=prediction, steps=steps)
 
