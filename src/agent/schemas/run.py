@@ -14,6 +14,25 @@ class AgentStep(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)  # e.g. {"query": ...}
     observation: str = ""
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def miss(self) -> bool:
+        """The tool found nothing — every such message starts "No …"/"Unknown …"."""
+        return self.observation.startswith(("No ", "Unknown "))
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def num_paragraphs(self) -> int:
+        return self.observation.count("[Paragraph ")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def num_articles(self) -> int:
+        """Article titles listed by a lookup/search step."""
+        return 0 if self.miss else sum(
+            1 for line in self.observation.splitlines() if line.startswith("- ")
+        )
+
 
 class AgentRun(BaseModel):
     """Full result + metrics of running the agent on one example."""
@@ -75,4 +94,8 @@ class AgentRun(BaseModel):
     @property
     def paragraphs_used(self) -> int:
         """Paragraphs actually surfaced to the model across all tool calls."""
-        return sum(s.observation.count("[Paragraph ") for s in self.steps)
+        return sum(s.num_paragraphs for s in self.steps)
+
+    @property
+    def tool_sequence(self) -> list[str]:
+        return [s.tool for s in self.steps]
