@@ -4,15 +4,25 @@ The source is a dict ``{url: {section_texts, section_titles, title,
 image_urls, ...}}`` with ~2M articles, streamed with ijson (constant memory)
 into two tables: ``articles`` (metadata) and ``paragraphs`` (one row per
 non-empty section text, linked by url). The text lives only in ``paragraphs``.
+
+A final pass adds the name-lookup tables (``aliases`` + ``titles_fts``) that
+``KnowledgeBase.lookup_articles`` queries, so one run produces a KB the agent
+can use as-is. Use ``--index-only`` to rebuild just those on an existing KB.
 """
 
 import argparse
 import json
 import os
 import sqlite3
+import sys
+
+SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, SRC_ROOT)
 
 import ijson
 from tqdm import tqdm
+
+from retrieval.knowledge_base import alias_forms, title_tokens
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
 KB_JSON_PATH = f"{BASE_FOLDER}/encyclopedic_kb_wiki.json"
@@ -42,6 +52,50 @@ def create_schema(conn):
         );
         """
     )
+
+
+NAME_INDEX_SCHEMA = """
+DROP TABLE IF EXISTS aliases;
+DROP TABLE IF EXISTS titles_fts;
+CREATE TABLE aliases (
+    alias TEXT NOT NULL,
+    url   TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE titles_fts USING fts5(tokens, url UNINDEXED, tokenize='unicode61');
+"""
+
+
+def build_name_index(conn):
+    """Add the name → article lookup tables over the existing ``articles``.
+
+    Normalisation must match ``KnowledgeBase`` exactly, hence the shared helpers:
+    a mismatch between build time and query time fails silently.
+    """
+    print("Reading articles for the name index …")
+    articles = conn.execute("SELECT url, title FROM articles").fetchall()
+    conn.executescript(NAME_INDEX_SCHEMA)
+
+    alias_rows, fts_rows, n_aliases = [], [], 0
+
+    def flush():
+        conn.executemany("INSERT INTO aliases VALUES (?,?)", alias_rows)
+        conn.executemany("INSERT INTO titles_fts(tokens, url) VALUES (?,?)", fts_rows)
+        alias_rows.clear()
+        fts_rows.clear()
+
+    for url, title in tqdm(articles, desc="Name index"):
+        for alias in alias_forms(title):
+            alias_rows.append((alias, url))
+            n_aliases += 1
+        fts_rows.append((" ".join(sorted(title_tokens(title))), url))
+        if len(fts_rows) >= BATCH_SIZE * 10:
+            flush()
+    flush()
+
+    print("Creating index on aliases(alias) …")
+    conn.execute("CREATE INDEX idx_aliases_alias ON aliases(alias)")
+    conn.commit()
+    print(f"Name index: {len(articles)} articles, {n_aliases} aliases")
 
 
 def iter_rows(json_path):
@@ -114,6 +168,8 @@ def build(json_path, db_path, overwrite):
     conn.execute("CREATE INDEX idx_paragraphs_url ON paragraphs(url)")
     conn.commit()
 
+    build_name_index(conn)
+
     print("Optimising (ANALYZE) …")
     conn.execute("ANALYZE")
     conn.commit()
@@ -131,7 +187,24 @@ def main():
         action="store_true",
         help="Rebuild even if the .db already exists.",
     )
+    parser.add_argument(
+        "--index-only",
+        action="store_true",
+        help="Rebuild only the name-lookup tables on an existing KB.",
+    )
     args = parser.parse_args()
+
+    if args.index_only:
+        # Safe pragmas: a crash must leave the existing KB intact.
+        conn = sqlite3.connect(KB_DB_PATH)
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        build_name_index(conn)
+        conn.execute("ANALYZE")
+        conn.commit()
+        conn.close()
+        return
+
     build(KB_JSON_PATH, KB_DB_PATH, args.overwrite)
 
 
