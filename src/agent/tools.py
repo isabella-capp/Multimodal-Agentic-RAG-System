@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 from langchain_core.tools import tool
-from PIL import Image
-
-from agent.protocols import KnowledgeBase, Reranker, Retriever
 
 
 def _format(paragraphs: list[str]) -> str:
     return "\n\n".join(f"[Paragraph {i + 1}] {p}" for i, p in enumerate(paragraphs))
 
 
-def build_tools(retriever: Retriever, kb: KnowledgeBase, reranker: Reranker,
-                image: Image.Image,
-                top_n: int = 20, top_k: int = 20, lookup_limit: int = 5):
+def build_tools(retriever, kb, reranker, image, top_n=20, top_k=20, lookup_limit=5):
     """Retrieval tools for one query image, over a working set the agent grows.
 
     Two independent ways in — by name (string lookup, the only channel that can

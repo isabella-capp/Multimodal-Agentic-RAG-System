@@ -6,42 +6,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from PIL import Image
 from tqdm import tqdm
-from retrieval.retriever import Retriever
-from retrieval.knowledge_base import KnowledgeBase
-from vlm.arg_parser import parse_args
 
+import paths
 from prompts import NO_RAG_PROMPT, RAG_PROMPT
+from retrieval.knowledge_base import KnowledgeBase
+from retrieval.retriever import Retriever
+from vlm.arg_parser import parse_args
 from vlm.client import VLMClient
-from vlm.dataset import load_dataset
-
-BASE_FOLDER = "/work/cvcs2026/encyclopedic"
-JSON_PATH = f"{BASE_FOLDER}/encyclopedic_test_subset.json"
-KB_DB_PATH = f"{BASE_FOLDER}/encyclopedic_kb_wiki.db"
-IMG_INDEX_PATH = f"{BASE_FOLDER}/knn.index"
-IMG_INDEX_JSON_PATH = f"{BASE_FOLDER}/knn.json"
-
-CROSS_ENCODER_MODEL = "BAAI/bge-reranker-base"
-RETRIEVER_DEVICE = "cuda"
-
-
-def load_done_ids(path):
-    if not os.path.exists(path):
-        return set()
-    with open(path, encoding="utf-8") as f:
-        return {json.loads(line)["unique_id"] for line in f if line.strip()}
-
-
-def build_record(item, prediction, retrieved_context=None):
-    record = {
-        "unique_id": item["unique_id"],
-        "question": item["question"],
-        "question_type": item["question_type"],
-        "answer": item["answer"],
-        "prediction": prediction,
-    }
-    if retrieved_context is not None:
-        record["retrieved_context"] = retrieved_context
-    return record
+from vlm.dataset import build_record, done_ids, load_dataset
 
 
 def write_record(out, record):
@@ -55,14 +27,15 @@ def build_rag_prompt(question, paragraphs):
 
 def setup_retrieval(top_k, use_cross_reranker):
     retriever = Retriever(
-        IMG_INDEX_PATH, IMG_INDEX_JSON_PATH, top_k=top_k, device=RETRIEVER_DEVICE
+        paths.IMG_INDEX_PATH, paths.IMG_INDEX_JSON_PATH, top_k=top_k,
+        device=paths.RETRIEVER_DEVICE, ef_search=paths.EF_SEARCH
     )
-    kb = KnowledgeBase(KB_DB_PATH)
+    kb = KnowledgeBase(paths.KB_PATH)
     reranker = None
     if use_cross_reranker:
         from retrieval.reranker import CrossEncoderReranker
 
-        reranker = CrossEncoderReranker(CROSS_ENCODER_MODEL, device=RETRIEVER_DEVICE)
+        reranker = CrossEncoderReranker(paths.CROSS_ENCODER_MODEL, device=paths.RETRIEVER_DEVICE)
     return retriever, kb, reranker
 
 
@@ -137,12 +110,12 @@ def print_debug_example(item, retrieved_context, top_paragraphs, prediction):
 def main():
     args = parse_args()
 
-    dataset = load_dataset(JSON_PATH, BASE_FOLDER)
+    dataset = load_dataset(paths.JSON_PATH, paths.BASE_FOLDER)
     if args.limit is not None:
         dataset = dataset[: args.limit]
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    done_ids = load_done_ids(args.output)
+    done_ids = done_ids(args.output)
     if done_ids:
         print(f"Skipping {len(done_ids)} already-predicted examples")
 

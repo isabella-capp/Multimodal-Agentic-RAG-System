@@ -54,7 +54,7 @@ for entry in "${MODELS[@]}"; do
     echo "################ $tag  ($model)"
     rm -f "$pred" "$OUT_DIR/${tag}.metrics.json"  # the eval resumes, so start clean
 
-    uv run python src/agent/run_agentic_eval.py \
+    uv run python src/agent/run_inference.py \
         --model-name "$model" \
         --base-url "https://openrouter.ai/api/v1" \
         --output "$pred" \

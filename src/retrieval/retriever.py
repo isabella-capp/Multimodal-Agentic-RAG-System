@@ -141,98 +141,32 @@ class Retriever:
         text_features = F.normalize(text_features, dim=-1)
         return text_features.cpu().numpy().astype(np.float32)
 
-    def retrieve_top_k(self, image: Image.Image):
-        """Search FAISS using an image and return metadata + scores.
+    def retrieve(self, image: Image.Image, question: str | None = None) -> list[dict]:
+        """Articles whose reference images are nearest to ``image``.
 
-        Returns
-        -------
-        results : list[dict]
-            Each dict has keys ``wiki_url``, ``title``, ``image_path``.
-        scores : list[float]
-            Raw FAISS distances (higher = more similar for inner-product).
+        ``question`` is unused: the CLIP text tower is misaligned with this index
+        (0% recall@50 even given the ground-truth title), so text cannot condition
+        the search. Kept because callers pass it.
         """
-        self._ensure_index()
-
-        query_embeds = self.encode_image(image)
-        distances, indices = self.img_index.search(query_embeds, k=self.top_k)
-
-        ids = indices[0]
-        raw_scores = distances[0].tolist()
-
-        results = []
-        for idx in ids:
-            if idx != -1 and idx < len(self.img_values):
-                data = self.img_values[idx]
-                results.append(
-                    {
-                        "wiki_url": data[0],
-                        "title": data[1],
-                        "image_path": data[2],
-                    }
-                )
-
-        return results, raw_scores
-
-    def retrieve(self, image: Image.Image, question: str | None = None):
-        """High-level retrieval: image → FAISS results with scores.
-
-        Parameters
-        ----------
-        image : PIL.Image.Image
-            The user query image.
-        question : str | None
-            The user question (currently unused in FAISS search but kept
-            for API consistency and future multimodal retrieval).
-
-        Returns
-        -------
-        results : list[dict]
-            Each dict has ``wiki_url``, ``title``, ``image_path``, ``score``.
-        """
-        raw_results, scores = self.retrieve_top_k(image)
-
-        results = []
-        for res, score in zip(raw_results, scores):
-            results.append({**res, "score": score})
-
-        return results
+        return self.search_index(self.encode_image(image), self.top_k)
 
     def search_index(self, embedding: np.ndarray, top_k: int = 10) -> list[dict]:
         """Search FAISS with a normalised ``(1, D)`` embedding.
 
-        Returns candidate articles (deduplicated by ``wiki_url``), each with
-        ``wiki_url``, ``title``, ``image_path`` and ``score``.
+        Returns articles deduplicated by ``wiki_url``, each with ``wiki_url``,
+        ``title``, ``image_path`` and ``score``.
         """
         self._ensure_index()
-
         distances, indices = self.img_index.search(embedding, k=top_k)
 
-        results = []
-        seen = set()
+        results, seen = [], set()
         for idx, score in zip(indices[0], distances[0].tolist()):
             if idx == -1 or idx >= len(self.img_values):
                 continue
-            data = self.img_values[idx]
-            wiki_url = data[0]
-            if wiki_url in seen:
+            url, title, image_path = self.img_values[idx]
+            if url in seen:
                 continue
-            seen.add(wiki_url)
-            results.append(
-                {"wiki_url": wiki_url, "title": data[1], "image_path": data[2], "score": score}
-            )
+            seen.add(url)
+            results.append({"wiki_url": url, "title": title,
+                            "image_path": image_path, "score": score})
         return results
-
-    def retrieve_by_text(self, query: str, top_k: int = 10) -> list[dict]:
-        """Cross-modal retrieval: text query → shared CLIP space → image index."""
-        return self.search_index(self.encode_text(query), top_k)
-
-    def retrieve_by_fusion(
-        self, image: Image.Image, query: str, alpha: float = 0.6, top_k: int = 10
-    ) -> list[dict]:
-        """Query-conditioned retrieval: fuse image + text embeddings, then search.
-
-        ``alpha`` weights the image (1.0 = image only, 0.0 = text only).
-        """
-        fused = alpha * self.encode_image(image) + (1 - alpha) * self.encode_text(query)
-        fused = fused / np.linalg.norm(fused, axis=-1, keepdims=True)
-        return self.search_index(fused.astype(np.float32), top_k)

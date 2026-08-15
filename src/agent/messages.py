@@ -14,7 +14,7 @@ def image_to_data_uri(image_path: str) -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def build_user_message(image_path: str, question: str) -> HumanMessage:
+def build_user_message(image_path, question) -> HumanMessage:
     """First turn: the question text plus the query image."""
     return HumanMessage(
         content=[

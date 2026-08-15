@@ -66,7 +66,7 @@ evaluate() {
         --limit "$LIMIT" --concurrency 8 || true
 
     local pred="$OUT_DIR/predictions_${tag}.jsonl"
-    uv run python src/agent/run_agentic_eval.py \
+    uv run python src/agent/run_inference.py \
         --model-name "$model" --base-url "$base_url" \
         --output "$pred" --limit "$LIMIT" \
         --concurrency "$CONCURRENCY" --debug-samples 3 || true

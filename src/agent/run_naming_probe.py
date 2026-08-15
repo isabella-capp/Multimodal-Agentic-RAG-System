@@ -11,8 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from tqdm import tqdm
 
-from agent.evaluation.config import EvalConfig
-from agent.log import setup_logging
+import paths
 from agent.messages import image_to_data_uri
 from agent.prompts import NAMING_PROMPT
 from retrieval.knowledge_base import KnowledgeBase, normalize
@@ -38,27 +37,21 @@ def _name_one(llm, item: dict) -> str | None:
 
 
 def main():
-    d = EvalConfig()
     p = argparse.ArgumentParser(description="Can the model name the entity in the image?")
-    p.add_argument("--model-name", default=d.model_name)
-    p.add_argument("--base-url", default=d.base_url)
-    p.add_argument("--json-path", default=d.json_path)
-    p.add_argument("--base-folder", default=d.base_folder)
-    p.add_argument("--kb-path", default=d.kb_path)
+    p.add_argument("--model-name", default="Qwen/Qwen2.5-VL-3B-Instruct")
+    p.add_argument("--base-url", default="http://localhost:8000/v1")
     p.add_argument("--output", default="outputs/agentic/naming_probe.jsonl")
     p.add_argument("--limit", type=int, default=1000)
     p.add_argument("--concurrency", type=int, default=8)
     args = p.parse_args()
 
-    logger = setup_logging()
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    kb = KnowledgeBase(paths.KB_PATH)
 
-    kb = KnowledgeBase(args.kb_path)
-
-    dataset = [it for it in load_dataset(json_path=args.json_path,
-                                         base_folder=args.base_folder)
+    dataset = [it for it in load_dataset(json_path=paths.JSON_PATH,
+                                         base_folder=paths.BASE_FOLDER)
                if os.path.exists(it["image_path"])][: args.limit]
-    logger.info("Naming %d images with %s", len(dataset), args.model_name)
+    print(f"Naming {len(dataset)} images with {args.model_name}")
 
     llm = ChatOpenAI(model=args.model_name, base_url=args.base_url,
                      api_key=os.getenv("LLM_API_KEY", "EMPTY"), temperature=0.0)
@@ -93,19 +86,18 @@ def main():
             }, ensure_ascii=False) + "\n")
 
     n = len(dataset)
-    logger.info("=" * 62)
-    logger.info("model: %s   examples: %d", args.model_name, n)
-    logger.info("GT title resolvable by the index      : %5.1f%%", 100 * stats["gt_in_universe"] / n)
-    logger.info("predicted name == GT title (verbatim) : %5.1f%%", 100 * stats["exact_name"] / n)
-    logger.info("name RESOLVES to the GT article       : %5.1f%%   <- recall of lookup_article",
-                100 * stats["resolved"] / n)
-    logger.info("    via exact match                   : %5.1f%%", 100 * stats["resolved_exact"] / n)
-    logger.info("    via fuzzy match                   : %5.1f%%", 100 * stats["resolved_fuzzy"] / n)
-    logger.info("no name produced                      : %5.1f%%", 100 * stats["no_name"] / n)
-    logger.info("lookup ceiling w/ perfect naming      :  83.5%%")
-    logger.info("EVA-CLIP image recall@50 (reference)  :  46.7%%")
-    logger.info("=" * 62)
-    logger.info("Per-example detail: %s", args.output)
+    print("=" * 62)
+    print(f"model: {args.model_name}   examples: {n}")
+    print(f"GT title resolvable by the index      : {100 * stats['gt_in_universe'] / n:5.1f}%")
+    print(f"predicted name == GT title (verbatim) : {100 * stats['exact_name'] / n:5.1f}%")
+    print(f"name RESOLVES to the GT article       : {100 * stats['resolved'] / n:5.1f}%   <- recall of lookup_article")
+    print(f"    via exact match                   : {100 * stats['resolved_exact'] / n:5.1f}%")
+    print(f"    via fuzzy match                   : {100 * stats['resolved_fuzzy'] / n:5.1f}%")
+    print(f"no name produced                      : {100 * stats['no_name'] / n:5.1f}%")
+    print("lookup ceiling w/ perfect naming      :  83.5%")
+    print("EVA-CLIP image recall@50 (reference)  :  46.7%")
+    print("=" * 62)
+    print(f"Per-example detail: {args.output}")
 
 
 if __name__ == "__main__":
