@@ -8,11 +8,11 @@ SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, SRC_ROOT)
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from tqdm import tqdm
 
 import paths
 from agent.messages import image_to_data_uri
+from llm import chat_model
 from agent.prompts import NAMING_PROMPT
 from retrieval.knowledge_base import KnowledgeBase, normalize
 from vlm.dataset import load_dataset
@@ -30,7 +30,7 @@ def _name_one(llm, item: dict) -> str | None:
                 {"type": "image_url",
                  "image_url": {"url": image_to_data_uri(item["image_path"])}},
             ]),
-        ], max_tokens=32)
+        ])
         return resp.content if isinstance(resp.content, str) else str(resp.content)
     except Exception:
         return None
@@ -53,8 +53,7 @@ def main():
                if os.path.exists(it["image_path"])][: args.limit]
     print(f"Naming {len(dataset)} images with {args.model_name}")
 
-    llm = ChatOpenAI(model=args.model_name, base_url=args.base_url,
-                     api_key=os.getenv("LLM_API_KEY", "EMPTY"), temperature=0.0)
+    llm = chat_model(args.model_name, args.base_url, max_tokens=32)
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         names = list(tqdm(pool.map(lambda it: _name_one(llm, it), dataset),

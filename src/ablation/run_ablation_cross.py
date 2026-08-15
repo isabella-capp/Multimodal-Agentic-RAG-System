@@ -30,7 +30,7 @@ from tqdm import tqdm
 from retrieval.retriever import Retriever
 from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
-from vlm.client import VLMClient
+from llm import VLMClient
 from vlm.dataset import load_dataset
 from vlm.run_inference import build_rag_prompt, build_record
 

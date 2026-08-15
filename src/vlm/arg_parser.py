@@ -11,6 +11,7 @@ def parse_args():
     parser.add_argument("--model-name", default=MODEL_NAME)
     parser.add_argument("--base-url", default="http://localhost:8000/v1")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument(
         "--use-retrieval",
         action="store_true",

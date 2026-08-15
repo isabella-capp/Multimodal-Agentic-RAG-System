@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 
@@ -8,17 +7,13 @@ from PIL import Image
 from tqdm import tqdm
 
 import paths
+from llm import VLMClient
 from prompts import NO_RAG_PROMPT, RAG_PROMPT
 from retrieval.knowledge_base import KnowledgeBase
 from retrieval.retriever import Retriever
+from runner import load_todo, run_batch
 from vlm.arg_parser import parse_args
-from vlm.client import VLMClient
-from vlm.dataset import build_record, done_ids, load_dataset
-
-
-def write_record(out, record):
-    out.write(json.dumps(record, ensure_ascii=False) + "\n")
-    out.flush()
+from vlm.dataset import build_record
 
 
 def build_rag_prompt(question, paragraphs):
@@ -109,64 +104,36 @@ def print_debug_example(item, retrieved_context, top_paragraphs, prediction):
 
 def main():
     args = parse_args()
-
-    dataset = load_dataset(paths.JSON_PATH, paths.BASE_FOLDER)
-    if args.limit is not None:
-        dataset = dataset[: args.limit]
-
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    done_ids = done_ids(args.output)
-    if done_ids:
-        print(f"Skipping {len(done_ids)} already-predicted examples")
 
-    model = VLMClient(model_name=args.model_name, base_url=args.base_url)
-
+    model = VLMClient(args.model_name, args.base_url)
     retriever = kb = reranker = None
     if args.use_retrieval:
         retriever, kb, reranker = setup_retrieval(args.top_k, not args.no_rerank)
 
-    debug_count = 0
+    shown = []
 
-    with open(args.output, "a", encoding="utf-8") as out:
-        for item in tqdm(dataset, desc="Inference"):
-            if item["unique_id"] in done_ids:
-                continue
+    def predict(item):
+        prompt = NO_RAG_PROMPT.format(question=item["question"])
+        paragraphs = retrieved = None
+        if retriever is not None:
+            try:
+                context = build_context(retriever, kb, reranker, item["question"],
+                                        item["image_path"], args.rerank_top_n,
+                                        args.no_rerank)
+                if context is not None:
+                    paragraphs, retrieved = context
+                    prompt = build_rag_prompt(item["question"], paragraphs)
+            except Exception as e:
+                tqdm.write(f"retrieval failed for {item['unique_id']}: {e}")
 
-            image_path = item["image_path"]
-            if not os.path.exists(image_path):
-                tqdm.write(f"missing image: {image_path}")
-                write_record(out, build_record(item, None))
-                continue
+        prediction = model.generate_response(item["image_path"], prompt)
+        if len(shown) < args.debug_samples:
+            shown.append(item["unique_id"])
+            print_debug_example(item, retrieved, paragraphs, prediction)
+        return build_record(item, prediction, retrieved)
 
-            retrieved_context = None
-            top_paragraphs = None
-            prompt = NO_RAG_PROMPT.format(question=item["question"])
-
-            if retriever is not None:
-                try:
-                    context = build_context(
-                        retriever,
-                        kb,
-                        reranker,
-                        item["question"],
-                        image_path,
-                        args.rerank_top_n,
-                        args.no_rerank,
-                    )
-                    if context is not None:
-                        top_paragraphs, retrieved_context = context
-                        prompt = build_rag_prompt(item["question"], top_paragraphs)
-                except Exception as e:
-                    tqdm.write(f"retrieval failed for {item['unique_id']}: {e}")
-
-            prediction = model.generate_response(image_path, prompt)
-
-            if debug_count < args.debug_samples:
-                print_debug_example(item, retrieved_context, top_paragraphs, prediction)
-                debug_count += 1
-
-            write_record(out, build_record(item, prediction, retrieved_context))
-
+    run_batch(load_todo(args.output, args.limit), predict, args.output, args.concurrency)
     print(f"Done. Predictions saved to {args.output}")
 
 

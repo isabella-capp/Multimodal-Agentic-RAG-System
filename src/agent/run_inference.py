@@ -9,16 +9,17 @@ SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, SRC_ROOT)
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from tqdm import tqdm
 
 import paths
 from agent.metrics import summarise
 from agent.rag import AgenticRAG
+from llm import chat_model
 from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
 from retrieval.retriever import Retriever
-from vlm.dataset import build_record, done_ids, load_dataset
+from runner import load_todo, run_batch
+from vlm.dataset import build_record
 
 MAX_TOKENS = 512
 
@@ -39,9 +40,7 @@ def parse_args():
 
 
 def build_agent(args):
-    llm = ChatOpenAI(model=args.model_name, base_url=args.base_url,
-                     api_key=os.getenv("LLM_API_KEY", "EMPTY"),
-                     max_tokens=MAX_TOKENS, temperature=0.0)
+    llm = chat_model(args.model_name, args.base_url, MAX_TOKENS)
     print(f"Agent model: {args.model_name} @ {args.base_url}")
 
     retriever = Retriever(paths.IMG_INDEX_PATH, paths.IMG_INDEX_JSON_PATH,
@@ -55,17 +54,6 @@ def build_agent(args):
     return AgenticRAG(llm, retriever, kb, reranker, top_n=args.rerank_top_n,
                       top_k=args.top_k, max_iterations=args.max_iterations,
                       force_first=args.force_first)
-
-
-def load_todo(output, limit):
-    """Examples still to do — the output file is appended to, so runs resume."""
-    dataset = load_dataset(json_path=paths.JSON_PATH, base_folder=paths.BASE_FOLDER)
-    if limit is not None:
-        dataset = dataset[:limit]
-    done = done_ids(output)
-    todo = [it for it in dataset if it["unique_id"] not in done]
-    print(f"Dataset: {len(dataset)} | already done: {len(done)} | to do: {len(todo)}")
-    return todo
 
 
 def format_trace(messages):
@@ -112,45 +100,32 @@ def main():
     args = parse_args()
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     agent = build_agent(args)
-    todo = load_todo(args.output, args.limit)
 
-    def work(item):
-        if not os.path.exists(item["image_path"]):
-            return item, None
-        return item, agent.run(item["image_path"], item["question"])
+    runs, shown, traced = [], [], []
+
+    def predict(item):
+        run = agent.run(item["image_path"], item["question"])
+        runs.append(run)
+
+        if len(shown) < args.debug_samples:
+            shown.append(item["unique_id"])
+            print_debug_example(item, run)
+        if not traced and run.tool_called and run.messages:
+            traced.append(item["unique_id"])
+            tqdm.write(format_trace(run.messages))
+
+        record = build_record(item, run.prediction)
+        record["agent"] = {
+            "tool_called": run.tool_called,
+            "num_tool_calls": len(run.steps),
+            "elapsed_seconds": run.elapsed_seconds,
+            "error": run.error,
+            "steps": [s.as_record() for s in run.steps],
+        }
+        return record
 
     t0 = time.time()
-    runs, traced, debug_left = [], False, args.debug_samples
-    with open(args.output, "a", encoding="utf-8") as out:
-        with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-            futures = [pool.submit(work, it) for it in todo]
-            for fut in tqdm(as_completed(futures), total=len(futures), desc="Agentic RAG"):
-                item, run = fut.result()
-                if run is None:
-                    print(f"missing image: {item['image_path']}")
-                    out.write(json.dumps(build_record(item=item, prediction=None),
-                                         ensure_ascii=False) + "\n")
-                    out.flush()
-                    continue
-
-                record = build_record(item=item, prediction=run.prediction)
-                record["agent"] = {
-                    "tool_called": run.tool_called,
-                    "num_tool_calls": len(run.steps),
-                    "elapsed_seconds": run.elapsed_seconds,
-                    "error": run.error,
-                    "steps": [s.as_record() for s in run.steps],
-                }
-                out.write(json.dumps(record, ensure_ascii=False) + "\n")
-                out.flush()
-                runs.append(run)
-
-                if debug_left > 0:
-                    print_debug_example(item, run)
-                    debug_left -= 1
-                if not traced and run.tool_called and run.messages:
-                    tqdm.write(format_trace(run.messages))
-                    traced = True
+    run_batch(load_todo(args.output, args.limit), predict, args.output, args.concurrency)
 
     metrics_path = args.output.rsplit(".", 1)[0] + ".metrics.json"
     metrics = summarise(runs, time.time() - t0)
