@@ -133,7 +133,9 @@ def main():
             print_debug_example(item, retrieved, paragraphs, prediction)
         return build_record(item, prediction, retrieved)
 
-    run_batch(load_todo(args.output, args.limit), predict, args.output, args.concurrency)
+    run_batch(load_todo(args.output, args.limit), predict, args.output,
+              args.concurrency, setting="B" if args.use_retrieval else "A",
+              model=args.model_name, top_k=args.top_k, rerank_top_n=args.rerank_top_n)
     print(f"Done. Predictions saved to {args.output}")
 
 

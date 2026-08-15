@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 import paths
+import provenance
 from vlm.dataset import build_record, done_ids, load_dataset
 
 
@@ -22,7 +23,8 @@ def load_todo(output: str, limit: int | None = None) -> list[dict]:
     return todo
 
 
-def run_batch(items: list[dict], predict, output: str, concurrency: int = 8) -> None:
+def run_batch(items: list[dict], predict, output: str, concurrency: int = 8,
+              **meta) -> None:
     """Run ``predict(item) -> record`` over items, appending JSONL to ``output``.
 
     Shared by the baselines and the agent: only ``predict`` differs. Records are
@@ -41,3 +43,5 @@ def run_batch(items: list[dict], predict, output: str, concurrency: int = 8) -> 
             for fut in tqdm(as_completed(futures), total=len(futures), desc="Inference"):
                 out.write(json.dumps(fut.result(), ensure_ascii=False) + "\n")
                 out.flush()
+
+    provenance.stamp(output, examples=len(items), **meta)

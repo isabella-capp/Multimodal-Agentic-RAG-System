@@ -125,7 +125,10 @@ def main():
         return record
 
     t0 = time.time()
-    run_batch(load_todo(args.output, args.limit), predict, args.output, args.concurrency)
+    run_batch(load_todo(args.output, args.limit), predict, args.output,
+              args.concurrency, setting="C", model=args.model_name,
+              top_k=args.top_k, rerank_top_n=args.rerank_top_n,
+              max_iterations=args.max_iterations, force_first_tool=args.force_first)
 
     metrics_path = args.output.rsplit(".", 1)[0] + ".metrics.json"
     metrics = summarise(runs, time.time() - t0)
