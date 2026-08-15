@@ -1,14 +1,3 @@
-"""Run Qwen2.5-VL inference over Encyclopedic-VQA and save predictions as JSONL.
-
-Supports two modes:
-
-* **Baseline** (default): the VLM answers using only the image + question.
-* **With retrieval** (``--use-retrieval``): the image retrieves the most similar
-  Wikipedia article via FAISS, then the top KB paragraphs are added as context.
-
-The run is resumable: already-predicted unique_ids are skipped on restart.
-"""
-
 import json
 import os
 import sys
@@ -21,7 +10,9 @@ from retrieval.retriever import Retriever
 from retrieval.knowledge_base import KnowledgeBase
 from vlm.arg_parser import parse_args
 
-from vlm.qwen_model import QwenVQAModel, load_dataset
+from prompts import NO_RAG_PROMPT, RAG_PROMPT
+from vlm.client import VLMClient
+from vlm.dataset import load_dataset
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
 JSON_PATH = f"{BASE_FOLDER}/encyclopedic_test_subset.json"
@@ -29,7 +20,6 @@ KB_DB_PATH = f"{BASE_FOLDER}/encyclopedic_kb_wiki.db"
 IMG_INDEX_PATH = f"{BASE_FOLDER}/knn.index"
 IMG_INDEX_JSON_PATH = f"{BASE_FOLDER}/knn.json"
 
-MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
 CROSS_ENCODER_MODEL = "BAAI/bge-reranker-base"
 RETRIEVER_DEVICE = "cuda"
 
@@ -60,13 +50,7 @@ def write_record(out, record):
 
 
 def build_rag_prompt(question, paragraphs):
-    context = "\n\n".join(paragraphs)
-    return (
-        "Answer the question concisely based on the provided image and the following context. "
-        "Strictly use only the information provided in the context or visible in the image.\n\n"
-        f"--- CONTEXT ---\n{context}\n\n"
-        f"--- QUESTION ---\n{question}\n\n"
-    )
+    return RAG_PROMPT.format(context="\n\n".join(paragraphs), question=question)
 
 
 def setup_retrieval(top_k, use_cross_reranker):
@@ -162,7 +146,7 @@ def main():
     if done_ids:
         print(f"Skipping {len(done_ids)} already-predicted examples")
 
-    model = QwenVQAModel(model_name=MODEL_NAME)
+    model = VLMClient(model_name=args.model_name, base_url=args.base_url)
 
     retriever = kb = reranker = None
     if args.use_retrieval:
@@ -183,7 +167,7 @@ def main():
 
             retrieved_context = None
             top_paragraphs = None
-            prompt = item["question"]
+            prompt = NO_RAG_PROMPT.format(question=item["question"])
 
             if retriever is not None:
                 try:

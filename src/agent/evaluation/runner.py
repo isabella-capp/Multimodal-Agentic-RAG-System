@@ -11,7 +11,7 @@ from langchain_openai import ChatOpenAI
 from retrieval.retriever import Retriever
 from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
-from vlm.qwen_model import load_dataset
+from vlm.dataset import load_dataset
 from vlm.run_inference import build_record
 from agent.rag import AgenticRAG
 from agent.schemas import AgentRun

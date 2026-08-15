@@ -1,11 +1,15 @@
 import argparse
 
+MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Qwen2.5-VL inference on Encyclopedic-VQA"
     )
     parser.add_argument("--output", default="outputs/predictions.jsonl")
+    parser.add_argument("--model-name", default=MODEL_NAME)
+    parser.add_argument("--base-url", default="http://localhost:8000/v1")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
         "--use-retrieval",

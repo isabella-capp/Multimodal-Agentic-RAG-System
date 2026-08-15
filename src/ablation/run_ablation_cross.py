@@ -30,7 +30,8 @@ from tqdm import tqdm
 from retrieval.retriever import Retriever
 from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
-from vlm.qwen_model import QwenVQAModel, load_dataset
+from vlm.client import VLMClient
+from vlm.dataset import load_dataset
 from vlm.run_inference import build_rag_prompt, build_record
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
@@ -51,6 +52,7 @@ def parse_args():
 
     # Model
     p.add_argument("--model-name", default="Qwen/Qwen2.5-VL-3B-Instruct")
+    p.add_argument("--base-url", default="http://localhost:8000/v1")
 
     # Retriever
     p.add_argument("--img-index-path", default=f"{BASE_FOLDER}/knn.index")
@@ -219,7 +221,7 @@ def main():
     # ── Load models (ONCE) ───────────────────────────────────────────────
     print(f"\n{'='*70}")
     print("Loading Qwen VLM …")
-    model = QwenVQAModel(model_name=args.model_name)
+    model = VLMClient(model_name=args.model_name, base_url=args.base_url)
 
     print(f"\n{'='*70}")
     print("Loading EVA-CLIP retriever …")

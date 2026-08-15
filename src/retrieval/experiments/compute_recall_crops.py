@@ -11,7 +11,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from retrieval.retriever import Retriever
-from vlm.qwen_model import load_dataset
+from vlm.dataset import load_dataset
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
 POOL = 100                       # candidate articles fed to the RAG (recall ceiling)

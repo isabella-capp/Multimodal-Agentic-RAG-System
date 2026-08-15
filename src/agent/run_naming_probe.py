@@ -16,7 +16,7 @@ from agent.log import setup_logging
 from agent.messages import image_to_data_uri
 from agent.prompts import NAMING_PROMPT
 from retrieval.knowledge_base import KnowledgeBase, normalize
-from vlm.qwen_model import load_dataset
+from vlm.dataset import load_dataset
 
 
 def _norm_url(url: str) -> str:

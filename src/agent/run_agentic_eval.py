@@ -7,7 +7,7 @@ sys.path.insert(0, SRC_ROOT)
 from agent.log import setup_logging
 from agent.evaluation import AgenticEvaluator, EvalConfig, build_agent
 from agent.trace import format_trace
-from vlm.qwen_model import load_dataset
+from vlm.dataset import load_dataset
 
 
 def _trace_one(agent, dataset, logger, max_try: int = 25) -> None:
