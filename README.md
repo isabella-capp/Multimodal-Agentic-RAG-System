@@ -24,7 +24,8 @@ search key), never to **answer**: every fact must come from a retrieved passage.
   automatically on first run).
 - Shared assets already present under `/work/cvcs2026/` for the account:
   - HuggingFace cache (`recursive_retrievers/hf_cache`) with Qwen2.5-VL-3B/7B,
-    EVA-CLIP-8B, `bge-reranker-base`, `clip-vit-large-patch14`.
+    Qwen3-VL-8B, EVA-CLIP-8B, `bge-reranker-base`, `clip-vit-large-patch14`
+    (add more with `scripts/setup/download_model.sh <hf-id>`).
   - `encyclopedic/`: `knn.index`, `knn.json`, `encyclopedic_kb_wiki.db`,
     `encyclopedic_test_subset.json`.
 - Clone the repo to your home (e.g. `/homes/$USER/cvcs2026`) and submit from its root.
@@ -52,8 +53,8 @@ produces them automatically; `--index-only` rebuilds just them on an existing KB
 (seconds, instead of re-ingesting the 15 GB source JSON):
 
 ```bash
-sbatch scripts/build_kb_sqlite.sh                 # full KB, name index included
-sbatch scripts/build_kb_sqlite.sh --index-only    # only the name tables
+sbatch scripts/setup/build_kb_sqlite.sh                 # full KB, name index included
+sbatch scripts/setup/build_kb_sqlite.sh --index-only    # only the name tables
 ```
 
 Use it through `KnowledgeBase`, the single point of access to the DB:
@@ -69,22 +70,34 @@ fails silently — so both use the helpers in `src/retrieval/knowledge_base.py`.
 
 ## Run
 
+Scripts are grouped by phase; `scripts/lib/vllm.sh` holds the serving lifecycle
+they share, so each script contains only its experiment.
+
 ```bash
-export LLM_API_KEY=sk-or-v1-...                       # only for remote models
-sbatch --export=ALL scripts/run_model_sweep.sh        # 3B, 7B and a remote model
-sbatch --export=ALL scripts/run_smoke.sh              # 5 examples, checks a remote model works
-sbatch --export=ALL scripts/run_naming_probe.sh       # naming ability only, no GPU
+sbatch scripts/baselines/run_baselines.sh          # A (no-RAG) and B (RAG)
+sbatch scripts/agentic/run_sweep.sh                # C across model sizes
+
+export LLM_API_KEY=sk-or-v1-...                    # only for remote models
+sbatch --export=ALL scripts/agentic/run_smoke.sh   # 5 examples, checks a remote model works
+sbatch --export=ALL scripts/agentic/run_sweep.sh   # adds the remote model to the sweep
 ```
 
-The sweep serves each local model on vLLM (staging the weights to node-local disk
-so loading is fast and immune to `/work` contention), runs a naming probe and the
-full evaluation, and scores the predictions. It skips any model already scored, so
-re-submitting only fills the gaps. The first run also builds an isolated vLLM venv
-at `/homes/$USER/vllm_venv`.
+Every setting answers through the same vLLM endpoint, so A, B and C differ only
+in the prompt and the retrieved context. Jobs serve their model on a port derived
+from the SLURM job id and verify `/v1/models` before running — `localhost` is
+per node, and a fixed port silently hands your requests to whoever else is
+serving vLLM there. The sweep skips any model already scored, so re-submitting
+only fills the gaps. The first run builds an isolated vLLM venv at
+`/homes/$USER/vllm_venv`.
+
+Set `SMOKE=1` on the baselines to run 5 examples per setting — worth doing when
+switching model, since bad image preprocessing degrades answers silently.
 
 ## Outputs
 
-Under `outputs/agentic/sweep/` (git-ignored), per model tag:
+Baselines land in `outputs/baselines/<tag>/` as `predictions_A|B.jsonl` and
+`results_A|B.json`. The agentic sweep writes to `outputs/agentic/sweep/`
+(both git-ignored), per model tag:
 
 - `naming_<tag>.jsonl` — predicted entity name, candidates, whether it resolved
 - `predictions_<tag>.jsonl` — predictions + the agent trace for each example
