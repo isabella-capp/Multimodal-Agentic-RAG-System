@@ -1,4 +1,6 @@
-SYSTEM_PROMPT = """\
+from prompts import ANSWER_FORMAT
+
+SYSTEM_PROMPT = f"""\
 You are a multimodal question-answering assistant. You are given an image and a \
 question about the entity shown in it, plus tools that look things up on Wikipedia.
 
@@ -26,12 +28,8 @@ with a narrower query, or read another candidate article.
 match, but do not loop forever either — after a few reads, answer with the \
 best-supported evidence you have.
 
-The FINAL message must be ONLY the answer, as short as possible — usually a single \
-word or a short noun phrase (1-4 words). NEVER write a full sentence, NEVER restate \
-the question, NEVER add explanations or phrases such as "Based on the context". For \
-example, answer "Texas", not "This plant is found in Texas."; answer "founder", not \
-"The founder population was larger.". For multiple answers, output only the answers \
-separated by commas."""
+The FINAL message must follow this format.
+{ANSWER_FORMAT}"""
 
 NAMING_PROMPT = """\
 You are shown an image. Name the single main entity in it as precisely as you can \
