@@ -17,6 +17,14 @@ its own working set of articles:
 The model may use its own knowledge to **name** what it sees (that is only a
 search key), never to **answer**: every fact must come from a retrieved passage.
 
+Three settings are compared, always at a fixed model:
+
+| | |
+|---|---|
+| **A** | no retrieval — what the model answers on its own |
+| **B** | retrieval + cross-encoder, the standard RAG baseline |
+| **C** | the agentic loop above |
+
 ## Requirements
 
 - SLURM cluster with the `cvcs2026` account and an A40/L40S (45 GB) GPU.
@@ -29,6 +37,67 @@ search key), never to **answer**: every fact must come from a retrieved passage.
   - `encyclopedic/`: `knn.index`, `knn.json`, `encyclopedic_kb_wiki.db`,
     `encyclopedic_test_subset.json`.
 - Clone the repo to your home (e.g. `/homes/$USER/cvcs2026`) and submit from its root.
+
+## Running experiments
+
+**Always launch through `scripts/submit.sh`.** It snapshots the code before
+submitting, which is what makes a queued job run what you actually submitted:
+
+```bash
+scripts/submit.sh scripts/run_abc.sh                       # A, B and C, one model
+VARIANT=lookup-first scripts/submit.sh scripts/run_abc.sh  # a named attempt
+SMOKE=1 scripts/submit.sh scripts/run_abc.sh --time=00:40:00   # 5 examples
+
+export LLM_API_KEY=sk-or-v1-...                            # only for remote models
+scripts/submit.sh scripts/agentic/run_sweep.sh             # C across model sizes
+scripts/submit.sh scripts/agentic/run_smoke.sh             # does a remote model work at all
+```
+
+Anything after the script path is passed through to `sbatch`.
+
+`run_abc.sh` runs the three settings against **one vLLM server in one job**, so
+they differ only in method — same weights, same endpoint, same prompt format,
+same examples. `run_sweep.sh` answers the other question, C across model sizes,
+and skips any model already scored so re-submitting only fills the gaps.
+
+Jobs serve their model on a port derived from the SLURM job id and verify
+`/v1/models` before running: `localhost` is per node, and with a fixed port a
+colleague's vLLM on the same node silently answers your requests — which once
+cost a full run of empty predictions.
+
+Use `SMOKE=1` when switching model. Bad image preprocessing degrades answers
+without raising anything, and five examples show it immediately.
+
+## Working on variants
+
+`sbatch` copies the `.sh` at submission but reads the `.py` **when the job
+starts**. Editing a strategy while an earlier job is queued therefore changes
+what that job runs, and loses the version you meant to test. `submit.sh` avoids
+both by copying `src/`, `scripts/` and the scorer into `runs/<id>/` and pointing
+the job there — 460 KB per run, and the working tree is yours again the moment
+the job is submitted.
+
+```
+runs/20260815-104401-lookup-first/
+├── src/  scripts/  evqa_eval/   the exact code that ran
+├── RUN_INFO                     run id, variant, commit, branch, dirty count
+├── uncommitted.diff             changes not in git at submit time
+└── JOB_ID
+```
+
+So the loop is: edit → `VARIANT=name scripts/submit.sh …` → edit again for the
+next idea, without waiting. Each run keeps its own code, its own
+`logs/<run-id>/` and its own `outputs/abc/<model>/<run-id>/`, so attempts never
+overwrite each other.
+
+Every predictions file also gets a `.meta.json` recording the run id, variant,
+commit, dirty flag and the exact command. Under `submit.sh` those come from the
+snapshot's `RUN_INFO`, captured at **submit** time — reading git when the job
+starts would report whatever the tree holds by then, which is exactly what
+changes while a job waits in the queue.
+
+Git branches are still the right tool once a variant *wins* and you want to keep
+it; `runs/` tells you which one that was.
 
 ## Knowledge base and name index (SQLite)
 
@@ -68,42 +137,39 @@ kb.get_paragraphs_by_url(wiki_url=...)    # the article text
 Normalisation at build time and at query time must stay identical — a mismatch
 fails silently — so both use the helpers in `src/retrieval/knowledge_base.py`.
 
-## Run
+## Layout
 
-Scripts are grouped by phase; `scripts/lib/vllm.sh` holds the serving lifecycle
-they share, so each script contains only its experiment.
-
-```bash
-sbatch scripts/baselines/run_baselines.sh          # A (no-RAG) and B (RAG)
-sbatch scripts/agentic/run_sweep.sh                # C across model sizes
-
-export LLM_API_KEY=sk-or-v1-...                    # only for remote models
-sbatch --export=ALL scripts/agentic/run_smoke.sh   # 5 examples, checks a remote model works
-sbatch --export=ALL scripts/agentic/run_sweep.sh   # adds the remote model to the sweep
+```
+src/
+  paths.py prompts.py llm.py runner.py provenance.py   shared by every setting
+  vlm/        arg_parser  dataset  run_inference       A and B
+  agent/      prompts messages tools rag run metrics   C
+              run_inference  run_naming_probe
+  retrieval/  retriever  knowledge_base  reranker  build_kb_sqlite
+scripts/
+  submit.sh          snapshot + submit — the way to launch
+  run_abc.sh         A, B and C for one model
+  lib/vllm.sh        serving lifecycle shared by every experiment
+  agentic/  baselines/  retrieval/  setup/
 ```
 
-Every setting answers through the same vLLM endpoint, so A, B and C differ only
-in the prompt and the retrieved context. Jobs serve their model on a port derived
-from the SLURM job id and verify `/v1/models` before running — `localhost` is
-per node, and a fixed port silently hands your requests to whoever else is
-serving vLLM there. The sweep skips any model already scored, so re-submitting
-only fills the gaps. The first run builds an isolated vLLM venv at
-`/homes/$USER/vllm_venv`.
-
-Set `SMOKE=1` on the baselines to run 5 examples per setting — worth doing when
-switching model, since bad image preprocessing degrades answers silently.
+`runner.run_batch` owns the loop, the thread pool, the resume and the writing;
+each script supplies only its `predict`. `llm.chat_model` is the only place a
+chat client is built. Keeping those single means A, B and C cannot drift apart
+without someone noticing.
 
 ## Outputs
 
-Baselines land in `outputs/baselines/<tag>/` as `predictions_A|B.jsonl` and
-`results_A|B.json`. The agentic sweep writes to `outputs/agentic/sweep/`
-(both git-ignored), per model tag:
+Under `outputs/` (git-ignored):
 
-- `naming_<tag>.jsonl` — predicted entity name, candidates, whether it resolved
-- `predictions_<tag>.jsonl` — predictions + the agent trace for each example
-- `predictions_<tag>.metrics.json` — tool usage, miss rate per tool, entry tool,
-  call sequences, timing
-- `results_<tag>.json` — Encyclopedic-VQA accuracy (EM + BEM)
+- `abc/<model>/<run-id>/` — `predictions_A|B|C.jsonl`, `results_A|B|C.json`, and
+  a `.meta.json` per prediction file
+- `agentic/sweep/` — the model sweep, per tag: `naming_<tag>.jsonl` (predicted
+  entity name and whether it resolved), `predictions_<tag>.jsonl`,
+  `predictions_<tag>.metrics.json` (tool usage, miss rate per tool, entry tool,
+  call sequences) and `results_<tag>.json`
+- `final_test/`, `ablation*/`, `retrieval/` — the phase-B record, kept as-is
+- `_archive/` — results from pipelines that no longer exist
 
-Progress, the naming-probe summary, and a few full agent traces go to
-`logs/sweep_<jobid>.err`.
+Logs go to `logs/<run-id>/`, one directory per run: the SLURM `.out`/`.err` and
+the vLLM server log together.
