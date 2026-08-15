@@ -18,7 +18,8 @@ export PATH="$HOME/.local/bin:$PATH"
 export PYTHONUNBUFFERED=1
 unset SSL_CERT_DIR
 
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
 cd "$PROJECT_DIR"
 mkdir -p logs
 
-uv run python src/retrieval/build_kb_sqlite.py "$@"
+uv run python "$CODE_DIR"/src/retrieval/build_kb_sqlite.py "$@"

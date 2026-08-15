@@ -22,9 +22,10 @@ export PATH="$HOME/.local/bin:$PATH"
 export PYTHONUNBUFFERED=1
 unset SSL_CERT_DIR
 
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
 cd "$PROJECT_DIR"
 mkdir -p logs outputs/retrieval
 
-uv run python src/retrieval/compute_recall.py \
+uv run python "$CODE_DIR"/src/retrieval/compute_recall.py \
     --output outputs/retrieval/retrieval_topk50.jsonl \
     --top-k 50

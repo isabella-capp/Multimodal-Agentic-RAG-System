@@ -22,6 +22,7 @@ export PATH="$HOME/.local/bin:$PATH"
 export PYTHONUNBUFFERED=1
 unset SSL_CERT_DIR
 
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
 cd "$PROJECT_DIR"
 mkdir -p logs outputs/ablation data
 
@@ -29,12 +30,12 @@ mkdir -p logs outputs/ablation data
 VAL_JSON="$PROJECT_DIR/data/encyclopedic_val_split.json"
 if [ ! -f "$VAL_JSON" ]; then
     echo "Creating validation split …"
-    uv run python src/ablation/create_val_split.py
+    uv run python "$CODE_DIR"/src/ablation/create_val_split.py
     echo ""
 fi
 
 # ── Step 2: Run ablation study ───────────────────────────────────────────
-uv run python src/ablation/run_ablation_cross.py \
+uv run python "$CODE_DIR"/src/ablation/run_ablation_cross.py \
     --val-json "$VAL_JSON" \
     --output-dir outputs/ablation \
     --top-k-values 5 10 20 50 \
@@ -67,6 +68,6 @@ done
 cd "$PROJECT_DIR"
 echo ""
 echo "Aggregating results …"
-uv run python src/ablation/aggregate_ablation.py \
+uv run python "$CODE_DIR"/src/ablation/aggregate_ablation.py \
     --results-dir outputs/ablation \
     --output outputs/ablation/ablation_summary_BEM.json

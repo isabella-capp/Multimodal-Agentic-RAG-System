@@ -33,12 +33,13 @@ export PYTHONUNBUFFERED=1
 export PATH="$HOME/.local/bin:$PATH"
 unset SSL_CERT_DIR
 
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
 cd "$PROJECT_DIR"
 mkdir -p logs outputs/agentic
 
 : "${LLM_API_KEY:?LLM_API_KEY is not set — export it and submit with 'sbatch --export=ALL'}"
 
-uv run python src/agent/run_naming_probe.py \
+uv run python "$CODE_DIR"/src/agent/run_naming_probe.py \
     --model-name "$MODEL" \
     --base-url "https://openrouter.ai/api/v1" \
     --output "outputs/agentic/naming_probe_${TAG}.jsonl" \

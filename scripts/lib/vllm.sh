@@ -53,7 +53,7 @@ serve_model() {
     # Qwen2.5-VL ships a vision-only template with no tool-calling; Qwen3-VL and
     # later carry a correct one, so only patch the models that need it.
     case "$model" in
-        *Qwen2.5-VL*) extra=(--chat-template "$PROJECT_DIR/scripts/agentic/qwen2.5-vl-tool-chat-template.jinja") ;;
+        *Qwen2.5-VL*) extra=(--chat-template "${CODE_DIR:-$PROJECT_DIR}/scripts/agentic/qwen2.5-vl-tool-chat-template.jinja") ;;
     esac
 
     "$VENV/bin/vllm" serve "$serve" --port "$PORT" \
@@ -61,7 +61,7 @@ serve_model() {
         --gpu-memory-utilization "$gpu_util" --max-model-len "$max_len" \
         --enable-auto-tool-choice --tool-call-parser hermes "${extra[@]}" \
         --safetensors-load-strategy=prefetch \
-        > "logs/vllm_$(basename "$model")_${SLURM_JOB_ID:-0}.log" 2>&1 &
+        > "${LOG_DIR:-logs}/vllm_$(basename "$model")_${SLURM_JOB_ID:-0}.log" 2>&1 &
     VLLM_PID=$!
 
     echo "waiting for vLLM on port $PORT (up to $((ticks / 6)) min) ..."

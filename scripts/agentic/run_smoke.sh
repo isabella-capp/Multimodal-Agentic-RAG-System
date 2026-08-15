@@ -42,8 +42,9 @@ export PYTHONUNBUFFERED=1
 export PATH="$HOME/.local/bin:$PATH"
 unset SSL_CERT_DIR
 
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
 cd "$PROJECT_DIR"
-mkdir -p logs "$OUT_DIR"
+mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
 
 : "${LLM_API_KEY:?LLM_API_KEY is not set — export it and submit with 'sbatch --export=ALL'}"
 
@@ -54,7 +55,7 @@ for entry in "${MODELS[@]}"; do
     echo "################ $tag  ($model)"
     rm -f "$pred" "$OUT_DIR/${tag}.metrics.json"  # the eval resumes, so start clean
 
-    uv run python src/agent/run_inference.py \
+    uv run python "$CODE_DIR"/src/agent/run_inference.py \
         --model-name "$model" \
         --base-url "https://openrouter.ai/api/v1" \
         --output "$pred" \

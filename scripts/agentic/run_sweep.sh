@@ -39,6 +39,8 @@ CONCURRENCY=4
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 VENV="/homes/$USER/vllm_venv"
+# Set by scripts/submit.sh to a code snapshot; falls back to the live tree.
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
 OUT_DIR="outputs/agentic/sweep"
 
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
@@ -52,26 +54,26 @@ mkdir -p "$UV_CACHE_DIR"
 unset SSL_CERT_DIR
 
 cd "$PROJECT_DIR"
-mkdir -p logs "$OUT_DIR"
-source scripts/lib/vllm.sh
+mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
+source "$CODE_DIR/scripts/lib/vllm.sh"
 
 # evaluate <model> <base_url> <tag>
 evaluate() {
     local model="$1" base_url="$2" tag="$3"
     echo "################ $tag  ($model)"
 
-    uv run python src/agent/run_naming_probe.py \
+    uv run python "$CODE_DIR"/src/agent/run_naming_probe.py \
         --model-name "$model" --base-url "$base_url" \
         --output "$OUT_DIR/naming_${tag}.jsonl" \
         --limit "$LIMIT" --concurrency 8 || true
 
     local pred="$OUT_DIR/predictions_${tag}.jsonl"
-    uv run python src/agent/run_inference.py \
+    uv run python "$CODE_DIR"/src/agent/run_inference.py \
         --model-name "$model" --base-url "$base_url" \
         --output "$pred" --limit "$LIMIT" \
         --concurrency "$CONCURRENCY" --debug-samples 3 || true
 
-    (cd "$PROJECT_DIR/evqa_eval" && uv run python score_evqa.py \
+    (cd "$PROJECT_DIR/evqa_eval" && uv run python "$CODE_DIR/evqa_eval/score_evqa.py" \
         --predictions "../$pred" --output "../$OUT_DIR/results_${tag}.json") || true
 }
 
