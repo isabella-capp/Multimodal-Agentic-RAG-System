@@ -34,10 +34,11 @@ cp pyproject.toml uv.lock "$SNAP"/ 2>/dev/null || true
 } > "$SNAP/RUN_INFO"
 git diff HEAD > "$SNAP/uncommitted.diff" 2>/dev/null || true
 
+
+export CODE_DIR="$SNAP" RUN_ID="$RUN_ID" LOG_DIR="$LOG_DIR"
 JOB=$(sbatch --parsable \
-      --export=ALL,CODE_DIR="$SNAP",RUN_ID="$RUN_ID",LOG_DIR="$LOG_DIR" \
       --output="$LOG_DIR/%x_%j.out" --error="$LOG_DIR/%x_%j.err" \
-      "$@" "$SNAP/$SCRIPT")
+      "$@" "$SCRIPT")
 echo "submitted $JOB"
 echo "  code: runs/$RUN_ID"
 echo "  logs: $LOG_DIR/"
