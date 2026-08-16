@@ -32,6 +32,8 @@ from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
 from llm import VLMClient
 from vlm.dataset import load_dataset
+from prompts import NO_RAG_PROMPT
+from runner import run_batch
 from vlm.run_inference import build_rag_prompt, build_record
 
 BASE_FOLDER = "/work/cvcs2026/encyclopedic"
@@ -70,6 +72,7 @@ def parse_args():
                     help="List of rerank-top-n values to test.")
 
     # Debug
+    p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--debug-samples", type=int, default=1,
                     help="Print detailed trace for first N examples of each config.")
     p.add_argument("--limit", type=int, default=None,
@@ -87,7 +90,7 @@ def _truncate(text: str, n: int = 200) -> str:
 
 def run_single_config(
     dataset, model, retriever, kb, reranker, top_k, rerank_top_n,
-    output_path, debug_samples=1,
+    output_path, debug_samples=1, concurrency=8,
 ):
     """Run inference for a single (top_k, rerank_top_n) configuration.
 
@@ -98,18 +101,13 @@ def run_single_config(
     retriever.top_k = top_k
 
     records = []
-    debug_count = 0
+    shown = []
 
-    for item in tqdm(dataset, desc=f"  top_k={top_k} rerank_n={rerank_top_n}", leave=False):
+    def predict(item):
         image_path = item["image_path"]
-
-        if not os.path.exists(image_path):
-            records.append(build_record(item, None))
-            continue
-
         retrieved_context = None
         top_paragraphs = None
-        prompt = item["question"]
+        prompt = NO_RAG_PROMPT.format(question=item["question"])
 
         try:
             user_image = Image.open(image_path).convert("RGB")
@@ -145,7 +143,7 @@ def run_single_config(
 
         prediction = model.generate_response(image_path, prompt)
 
-        if debug_count < debug_samples:
+        if len(shown) < debug_samples:
             tqdm.write(f"\n  [DEBUG] {item['unique_id']} ({item['question_type']})")
             tqdm.write(f"    Q : {item['question']}")
             tqdm.write(f"    GT: {item['answer']}")
@@ -154,16 +152,15 @@ def run_single_config(
                 for i, p in enumerate(top_paragraphs, 1):
                     tqdm.write(f"      [{i}] {_truncate(p)}")
             tqdm.write(f"    Pred: {prediction}")
-            debug_count += 1
+            shown.append(item["unique_id"])
 
         record = build_record(item, prediction, retrieved_context)
         records.append(record)
+        return record
 
-    # Save predictions
-    with open(output_path, "w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
+    run_batch(dataset, predict, output_path, concurrency=concurrency,
+              setting="B-ablation", model=model.llm.model_name,
+              top_k=top_k, rerank_top_n=rerank_top_n)
     return records
 
 
@@ -284,6 +281,7 @@ def main():
             top_k=top_k,
             rerank_top_n=rerank_n,
             output_path=pred_path,
+            concurrency=args.concurrency,
             debug_samples=args.debug_samples,
         )
 
