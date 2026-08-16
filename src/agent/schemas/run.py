@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from distro import name
 from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -12,7 +11,7 @@ class AgentStep(BaseModel):
 
     order: int  # 1-based position in the loop — the "when"
     tool: str
-    arguments: dict[str, Any] = Field(default_factory=dict)  # e.g. {"query": ...}
+    arguments: dict[str, Any] = Field(default_factory=dict)  # e.g. {\"query\": ...}
     observation: str = ""
 
 
@@ -25,19 +24,16 @@ class AgentRun(BaseModel):
     steps: list[AgentStep] = Field(default_factory=list)
     elapsed_seconds: float = 0.0
     error: str | None = None
-    # Raw LangGraph messages, kept only for tracing; never serialised.
+    # Raw messages / state, kept only for tracing; never serialised.
     raw: list[Any] = Field(default_factory=list, exclude=True, repr=False)
 
     @classmethod
     def from_messages(cls, messages: list) -> "AgentRun":
-        """Build a run from a LangGraph ``{"messages": [...]}`` result.
+        """Build a run from a LangGraph ``{\"messages\": [...]}`` result.
 
-        Pairs each tool call with its observation (by ``tool_call_id``) into an
-        ordered list of steps.
-
-        When the search pipeline uses ``submit_final_answer``, the prediction is
-        extracted from the ``__FINAL__:`` sentinel inside the ToolMessage.  The
-        submit call itself is excluded from the retrieval ``steps`` list.
+        Used exclusively by the **research** pipeline, which still runs on
+        LangChain's tool-calling agent.  Pairs each tool call with its
+        observation and takes the last free-text AI message as the prediction.
         """
         calls: dict[str, tuple[str, dict]] = {}
         for m in messages:
@@ -46,41 +42,45 @@ class AgentRun(BaseModel):
                     tool_call_id = tc.get("id")
                     if tool_call_id is None:
                         continue
-
                     calls[tool_call_id] = (tc["name"], tc.get("args", {}))
 
         steps: list[AgentStep] = []
-        prediction: str | None = None
-
         for m in messages:
             if isinstance(m, ToolMessage):
                 name, args = calls.get(m.tool_call_id, (m.name, {}))
 
                 if name is None:
                     continue
-
-                obs = str(m.content)
-                # Detect the submit_final_answer sentinel.
-                if name == "submit_final_answer" and obs.startswith("__FINAL__:"):
-                    prediction = obs[len("__FINAL__:"):]
-                    # Do NOT add this as a retrieval step.
-                    continue
+                
                 steps.append(
                     AgentStep(
                         order=len(steps) + 1,
                         tool=name,
                         arguments=args,
-                        observation=obs,
+                        observation=str(m.content),
                     )
                 )
-        
-        if prediction is None:
-            for m in reversed(messages):
-                if isinstance(m, AIMessage) and not m.tool_calls:
-                    prediction = m.content if isinstance(m.content, str) else str(m.content)
-                    break
+
+        prediction: str | None = None
+        for m in reversed(messages):
+            if isinstance(m, AIMessage) and not m.tool_calls:
+                prediction = m.content if isinstance(m.content, str) else str(m.content)
+                break
 
         return cls(prediction=prediction, steps=steps)
+
+    @classmethod
+    def from_graph_state(cls, state: dict) -> "AgentRun":
+        """Build a run from the final state dict produced by the XML search graph.
+
+        The graph stores ``prediction``, ``steps``, and ``error`` directly in
+        its state, so no message parsing is needed.
+        """
+        return cls(
+            prediction=state.get("prediction"),
+            steps=state.get("steps", []),
+            error=state.get("error"),
+        )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
