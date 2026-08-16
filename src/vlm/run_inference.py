@@ -25,6 +25,8 @@ def setup_retrieval(top_k, use_cross_reranker):
         paths.IMG_INDEX_PATH, paths.IMG_INDEX_JSON_PATH, top_k=top_k,
         device=paths.RETRIEVER_DEVICE, ef_search=paths.EF_SEARCH
     )
+    retriever._ensure_index()
+    retriever._ensure_model()
     kb = KnowledgeBase(paths.KB_PATH)
     reranker = None
     if use_cross_reranker:

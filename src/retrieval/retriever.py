@@ -1,3 +1,5 @@
+import threading
+
 import torch
 import torch.nn.functional as F
 import faiss
@@ -44,65 +46,70 @@ class Retriever:
         self._img_index_json_path = img_index_json_path
 
         # Lazy-loaded resources
+        self._lock = threading.Lock()
         self.img_index = None
         self.img_values = None
         self.processor = None
         self.embedding_model = None
 
     def _ensure_index(self):
-        """Load the FAISS index and its JSON mapping (once)."""
-        if self.img_index is not None:
-            return
+        """Load the FAISS index and its JSON mapping (once).
 
-        print("Loading FAISS index …")
-        self.img_index = faiss.read_index(self._img_index_path, faiss.IO_FLAG_MMAP)
-        with open(self._img_index_json_path, "r") as f:
-            self.img_values = json.load(f)
+        Locked: check-then-set under a thread pool let every worker pass the
+        guard before any of them assigned, loading one copy per thread.
+        """
+        with self._lock:
+            if self.img_index is not None:
+                return
 
-        # HNSW runs at a low default efSearch (~16), which under-retrieves. Raising
-        # it lifts recall@100 (~46% → ~53%) at no cost and no reindex.
-        if self.ef_search:
-            try:
-                idx = faiss.downcast_index(self.img_index)
-                if hasattr(idx, "hnsw"):
-                    idx.hnsw.efSearch = self.ef_search
-                    print(f"HNSW efSearch set to {self.ef_search}.")
-            except Exception as e:
-                print(f"Could not set efSearch: {e}")
+            print("Loading FAISS index …")
+            self.img_index = faiss.read_index(self._img_index_path, faiss.IO_FLAG_MMAP)
+            with open(self._img_index_json_path, "r") as f:
+                self.img_values = json.load(f)
 
-        print(f"FAISS index loaded ({self.img_index.ntotal} vectors).")
+            if self.ef_search:
+                try:
+                    idx = faiss.downcast_index(self.img_index)
+                    if hasattr(idx, "hnsw"):
+                        idx.hnsw.efSearch = self.ef_search
+                        print(f"HNSW efSearch set to {self.ef_search}.")
+                except Exception as e:
+                    print(f"Could not set efSearch: {e}")
+
+            print(f"FAISS index loaded ({self.img_index.ntotal} vectors).")
 
     def _ensure_model(self):
         """Load the EVA-CLIP model and image processor (once)."""
-        if self.embedding_model is not None:
-            return
+        with self._lock:
+            if self.embedding_model is not None:
+                return
 
-        self._model_dtype = torch.float16
+            self._model_dtype = torch.float16
 
-        print("Loading EVA-CLIP embedding model …")
-        self.processor = CLIPImageProcessor.from_pretrained(
-            "openai/clip-vit-large-patch14"
-        )
-        self.text_tokenizer = CLIPTokenizer.from_pretrained(
-            "openai/clip-vit-large-patch14"
-        )
-        self.embedding_model = (
-            AutoModel.from_pretrained(
-                "BAAI/EVA-CLIP-8B",
-                dtype=self._model_dtype,
-                trust_remote_code=True,
+            print("Loading EVA-CLIP embedding model …")
+            self.processor = CLIPImageProcessor.from_pretrained(
+                "openai/clip-vit-large-patch14"
             )
-            .to(self.device)
-            .eval()
-        )
+            self.text_tokenizer = CLIPTokenizer.from_pretrained(
+                "openai/clip-vit-large-patch14"
+            )
+            self.embedding_model = (
+                AutoModel.from_pretrained(
+                    "BAAI/EVA-CLIP-8B",
+                    dtype=self._model_dtype,
+                    trust_remote_code=True,
+                )
+                .to(self.device)
+                .eval()
+            )
 
-        for emb in (
-            self.embedding_model.vision_model.embeddings,
-            self.embedding_model.text_model.embeddings,
-        ):
-            n = emb.position_embedding.num_embeddings
-            emb.position_ids = torch.arange(n, device=self.device).expand((1, -1))
-        print(f"EVA-CLIP model loaded on {self.device} ({self._model_dtype}).")
+            for emb in (
+                self.embedding_model.vision_model.embeddings,
+                self.embedding_model.text_model.embeddings,
+            ):
+                n = emb.position_embedding.num_embeddings
+                emb.position_ids = torch.arange(n, device=self.device).expand((1, -1))
+            print(f"EVA-CLIP model loaded on {self.device} ({self._model_dtype}).")
 
     def encode_image(self, image: Image.Image) -> np.ndarray:
         """Encode an image into a normalised embedding vector.
