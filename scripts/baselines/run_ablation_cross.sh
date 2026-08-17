@@ -24,7 +24,7 @@ set -euo pipefail
 MODEL="Qwen/Qwen3-VL-8B-Instruct"
 TAG="qwen3vl8b"
 GPU_UTIL=0.50
-MAX_LEN=32768
+MAX_LEN=36864
 TOP_K_VALUES="5 10 20 50 80"
 TOP_N_VALUES="5 10 20 30 40 60"
 CONCURRENCY=8
@@ -32,7 +32,7 @@ CONCURRENCY=8
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 VENV="/homes/$USER/vllm_venv"
 CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
-OUT_DIR="outputs/ablation/$TAG/${RUN_ID:-manual}"
+OUT_DIR="outputs/ablation/$TAG"
 
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
 export HF_HUB_OFFLINE=1

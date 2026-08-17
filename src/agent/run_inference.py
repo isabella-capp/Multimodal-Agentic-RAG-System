@@ -22,6 +22,7 @@ from runner import load_todo, run_batch
 from vlm.dataset import build_record
 
 MAX_TOKENS = 512
+TRACE_SAMPLES = 3
 
 
 def parse_args():
@@ -110,7 +111,7 @@ def main():
         if len(shown) < args.debug_samples:
             shown.append(item["unique_id"])
             print_debug_example(item, run)
-        if not traced and run.tool_called and run.messages:
+        if len(traced) < TRACE_SAMPLES and run.tool_called and run.messages:
             traced.append(item["unique_id"])
             tqdm.write(format_trace(run.messages))
 

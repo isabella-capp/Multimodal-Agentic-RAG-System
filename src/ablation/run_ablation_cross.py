@@ -269,6 +269,10 @@ def main():
                 all_results[config_name] = json.load(f)
             continue
 
+        if os.path.exists(pred_path):
+            print(f"  [redo] discarding partial {os.path.basename(pred_path)}")
+            os.remove(pred_path)
+
         print(f"  top_k={top_k}, rerank_top_n={rerank_n}")
         t0 = time.time()
 

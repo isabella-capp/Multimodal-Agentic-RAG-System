@@ -31,11 +31,18 @@ def run_batch(items: list[dict], predict, output: str, concurrency: int = 8,
     written as they complete, so progress survives a killed job — which also
     means the output order is not the dataset order.
     """
+    failures: list[str] = []
+
     def work(item):
         if not os.path.exists(item["image_path"]):
             tqdm.write(f"missing image: {item['image_path']}")
             return build_record(item, None)
-        return predict(item)
+        try:
+            return predict(item)
+        except Exception as e:
+            failures.append(str(e))
+            tqdm.write(f"failed on {item['unique_id']}: {str(e)[:140]}")
+            return build_record(item, None)
 
     with open(output, "a", encoding="utf-8") as out:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
@@ -44,4 +51,9 @@ def run_batch(items: list[dict], predict, output: str, concurrency: int = 8,
                 out.write(json.dumps(fut.result(), ensure_ascii=False) + "\n")
                 out.flush()
 
-    provenance.stamp(output, examples=len(items), **meta)
+    if failures:
+        from collections import Counter
+        print(f"{len(failures)}/{len(items)} examples failed:")
+        for msg, n in Counter(failures).most_common(3):
+            print(f"  [{n}x] {msg[:160]}")
+    provenance.stamp(output, examples=len(items), failures=len(failures), **meta)
