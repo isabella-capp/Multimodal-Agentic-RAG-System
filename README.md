@@ -3,7 +3,7 @@
 Agentic retrieval-augmented VQA on Encyclopedic-VQA. A vision-language model,
 served on **vLLM** or reached over any OpenAI-compatible endpoint, drives a
 tool-using loop over a visual retrieval stack (EVA-CLIP + FAISS), a SQLite
-knowledge base, and a cross-encoder reranker. Three tools, and the agent grows
+knowledge base, and a cross-encoder reranker. Four tools, and the agent grows
 its own working set of articles:
 
 1. **`lookup_article(name)`** — resolve the entity the model recognises in the
@@ -12,7 +12,12 @@ its own working set of articles:
 2. **`search_by_image()`** — list the articles whose reference images match the
    query image; the fallback when the model cannot name what it sees.
 3. **`read_article(title, query)`** — cross-encoder over *all* the paragraphs of
-   a chosen article.
+   one chosen article.
+4. **`search_paragraphs(query)`** — cross-encoder over every candidate article at
+   once, each passage labelled with where it came from. Committing to a single
+   article is where the agent lost to plain RAG: it read the right one 15.6% of
+   the time against 41.3% for a pooled rerank, while being *more* accurate than
+   RAG whenever it did (0.656 vs 0.528).
 
 The model may use its own knowledge to **name** what it sees (that is only a
 search key), never to **answer**: every fact must come from a retrieved passage.
@@ -44,9 +49,9 @@ Three settings are compared, always at a fixed model:
 submitting, which is what makes a queued job run what you actually submitted:
 
 ```bash
-scripts/submit.sh scripts/run_abc.sh                       # A, B and C, one model
-VARIANT=lookup-first scripts/submit.sh scripts/run_abc.sh  # a named attempt
-SMOKE=1 scripts/submit.sh scripts/run_abc.sh --time=00:40:00   # 5 examples
+scripts/submit.sh scripts/run_abc.sh                       # A, B and C — the reference table
+VARIANT=hedge scripts/submit.sh scripts/agentic/run_c.sh   # C alone, one attempt
+SMOKE=1 scripts/submit.sh scripts/agentic/run_c.sh --time=00:40:00   # 5 examples
 
 export LLM_API_KEY=sk-or-v1-...                            # only for remote models
 scripts/submit.sh scripts/agentic/run_sweep.sh             # C across model sizes
@@ -57,8 +62,11 @@ Anything after the script path is passed through to `sbatch`.
 
 `run_abc.sh` runs the three settings against **one vLLM server in one job**, so
 they differ only in method — same weights, same endpoint, same prompt format,
-same examples. `run_sweep.sh` answers the other question, C across model sizes,
-and skips any model already scored so re-submitting only fills the gaps.
+same examples. Run it once per model to get the reference table, then iterate
+with `agentic/run_c.sh`: A and B never touch the agent's code, so re-running them
+per variant would spend two thirds of a job reproducing numbers you already have.
+`run_sweep.sh` answers the other question, C across model sizes, and skips any
+model already scored so re-submitting only fills the gaps.
 
 Jobs serve their model on a port derived from the SLURM job id and verify
 `/v1/models` before running: `localhost` is per node, and with a fixed port a
@@ -148,7 +156,8 @@ src/
   retrieval/  retriever  knowledge_base  reranker  build_kb_sqlite
 scripts/
   submit.sh          snapshot + submit — the way to launch
-  run_abc.sh         A, B and C for one model
+  run_abc.sh         A, B and C for one model — the reference table
+  agentic/run_c.sh   C alone — one variant per run
   lib/vllm.sh        serving lifecycle shared by every experiment
   agentic/  baselines/  retrieval/  setup/
 ```
@@ -162,8 +171,10 @@ without someone noticing.
 
 Under `outputs/` (git-ignored):
 
-- `abc/<model>/<run-id>/` — `predictions_A|B|C.jsonl`, `results_A|B|C.json`, and
-  a `.meta.json` per prediction file
+- `abc/<model>/<run-id>/` — the reference table: `predictions_A|B|C.jsonl`,
+  `results_A|B|C.json`, and a `.meta.json` per prediction file
+- `agentic/<model>/<run-id>/` — one agent variant: `predictions_C.jsonl`,
+  `predictions_C.metrics.json`, `results_C.json`
 - `agentic/sweep/` — the model sweep, per tag: `naming_<tag>.jsonl` (predicted
   entity name and whether it resolved), `predictions_<tag>.jsonl`,
   `predictions_<tag>.metrics.json` (tool usage, miss rate per tool, entry tool,
