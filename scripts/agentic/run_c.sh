@@ -1,0 +1,89 @@
+#!/bin/bash
+#SBATCH --job-name=agentic
+#SBATCH --partition=boost_usr_prod
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gres=gpu:1
+#SBATCH --constraint=gpu_A40_45G|gpu_L40S_45G
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
+#SBATCH --time=01:30:00
+#SBATCH --output=logs/agentic_%j.out
+#SBATCH --error=logs/agentic_%j.err
+#SBATCH --account=cvcs2026
+#
+# Setting C alone, for iterating on the agent. A and B do not touch the agent's
+# code, so re-running them per variant would spend two thirds of a job
+# reproducing numbers we already have — use scripts/run_abc.sh for the reference
+# table, this one for every attempt after it.
+#
+#   VARIANT=hedge scripts/submit.sh scripts/agentic/run_c.sh
+#
+# Run the full 1000 by default. Loading vLLM, EVA-CLIP, FAISS and the reranker
+# costs ~14 minutes whatever you do, while inference over all 1000 examples takes
+# ~29: a 5-example SMOKE=1 spends the same 14 minutes to produce 9 seconds of
+# signal. Only worth it to catch something obviously broken after a model change.
+
+set -euo pipefail
+
+MODEL="Qwen/Qwen3-VL-8B-Instruct"
+TAG="qwen3vl8b"
+GPU_UTIL=0.50      # the retriever and reranker share this GPU
+MAX_LEN=32768
+TOP_K=20
+TOP_N=20
+CONCURRENCY=4
+
+PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+VENV="/homes/$USER/vllm_venv"
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
+OUT_DIR="outputs/agentic/$TAG/${RUN_ID:-manual}"
+
+if [ "${SMOKE:-0}" = "1" ]; then
+    LIMIT=(--limit 5); DEBUG=5; OUT_DIR="$OUT_DIR/smoke"
+else
+    LIMIT=(); DEBUG=25   # one-line summaries: cheap, and enough to read the tool sequences
+fi
+
+export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
+export HF_HUB_OFFLINE=1
+export PYTHONUNBUFFERED=1
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export PATH="$HOME/.local/bin:$PATH"
+export TFHUB_CACHE_DIR="/work/cvcs2026/recursive_retrievers/tfhub_cache"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/recursive_retrievers/$USER/.uv_cache}"
+mkdir -p "$UV_CACHE_DIR"
+unset SSL_CERT_DIR
+
+cd "$PROJECT_DIR"
+mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
+source "$CODE_DIR/scripts/lib/vllm.sh"
+
+ensure_vllm_venv
+serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
+
+echo "################ C — agentic  ($MODEL${VARIANT:+, variant $VARIANT})"
+uv run python "$CODE_DIR"/src/agent/run_inference.py \
+    --model-name "$MODEL" --base-url "$BASE_URL" \
+    --output "$OUT_DIR/predictions_C.jsonl" \
+    --top-k "$TOP_K" --rerank-top-n "$TOP_N" \
+    --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" "${LIMIT[@]}"
+
+stop_model
+
+echo "################ scoring"
+(cd "$PROJECT_DIR/evqa_eval" && uv run python "$CODE_DIR/evqa_eval/score_evqa.py" \
+    --predictions "../$OUT_DIR/predictions_C.jsonl" \
+    --output "../$OUT_DIR/results_C.json") || true
+
+echo "################ summary"
+python3 -c "import json;print('  C:', json.load(open('$OUT_DIR/results_C.json'))['accuracy_overall'])" 2>/dev/null || echo "  C: n/a"
+echo "  tool use:"
+python3 -c "
+import json; d=json.load(open('$OUT_DIR/predictions_C.metrics.json'))
+print('   ', {k: d[k] for k in ('tool_called_pct','avg_tool_calls','avg_paragraphs_read','errors')})
+print('    first tool:', d['first_tool_pct'])
+for k,v in (d.get('tool_usage') or {}).items():
+    print(f'    {k:18s} calls={v[\"calls\"]:4d} miss={v[\"miss_pct\"]}%')
+" 2>/dev/null || true
+cat "$CODE_DIR/RUN_INFO" 2>/dev/null || echo "code: live tree (not submitted via scripts/submit.sh)"
