@@ -25,14 +25,22 @@ MODEL="Qwen/Qwen3-VL-8B-Instruct"
 TAG="qwen3vl8b"
 GPU_UTIL=0.50
 MAX_LEN=36864
-TOP_K_VALUES="5 10 20 50 80"
-TOP_N_VALUES="5 10 20 30 40 60"
+SPLIT="${SPLIT:-val}"
+if [ "$SPLIT" = "test" ]; then
+    JSON="/work/cvcs2026/encyclopedic/encyclopedic_test_subset.json"
+    TOP_K_VALUES="10 20 50"
+    TOP_N_VALUES="10 20 30"
+else
+    JSON="$PROJECT_DIR/data/encyclopedic_val_split.json"
+    TOP_K_VALUES="5 10 20 50 80"
+    TOP_N_VALUES="5 10 20 30 40 60"
+fi
 CONCURRENCY=8
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 VENV="/homes/$USER/vllm_venv"
 CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
-OUT_DIR="outputs/ablation/$TAG"
+OUT_DIR="outputs/ablation/$TAG/$SPLIT"
 
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
 export HF_HUB_OFFLINE=1
@@ -51,10 +59,10 @@ source "$CODE_DIR/scripts/lib/vllm.sh"
 ensure_vllm_venv
 serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 
-echo "################ inference over the grid"
+echo "################ grid on $SPLIT: k=[$TOP_K_VALUES] x n=[$TOP_N_VALUES]"
 uv run python "$CODE_DIR"/src/ablation/run_ablation_cross.py \
     --model-name "$MODEL" --base-url "$BASE_URL" \
-    --val-json "$PROJECT_DIR/data/encyclopedic_val_split.json" \
+    --val-json "$JSON" \
     --output-dir "$OUT_DIR" \
     --top-k-values $TOP_K_VALUES \
     --rerank-top-n-values $TOP_N_VALUES \
