@@ -3,7 +3,6 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, SRC_ROOT)
@@ -33,7 +32,7 @@ def parse_args():
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--top-k", type=int, default=20)
     p.add_argument("--rerank-top-n", type=int, default=20)
-    p.add_argument("--max-iterations", type=int, default=8)
+    p.add_argument("--max-iterations", type=int, default=12)
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--debug-samples", type=int, default=3)
     p.add_argument("--no-force-first-tool", dest="force_first", action="store_false")

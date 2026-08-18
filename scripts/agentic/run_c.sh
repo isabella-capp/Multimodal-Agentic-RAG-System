@@ -31,7 +31,7 @@ TAG="qwen3vl8b"
 GPU_UTIL=0.50      # the retriever and reranker share this GPU
 MAX_LEN=32768
 TOP_K=20
-TOP_N=20
+TOP_N=5
 CONCURRENCY=4
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
