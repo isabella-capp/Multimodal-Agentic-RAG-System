@@ -27,3 +27,24 @@ that is in the context or visible in the image.
 {{question}}
 
 {ANSWER_FORMAT}"""
+
+
+# The prompts as they were before the shared format constraint. Kept to
+# reproduce the historical B=0.401: that run averaged 19.3 words per answer
+# against 2.4 now, and BEM rewards the extra surface — the correct answer is
+# contained just as often either way (0.308 vs 0.297). Running B with these
+# separates "the metric liked long answers" from "the model knew less".
+NO_RAG_PROMPT_LEGACY = "{question}"
+
+RAG_PROMPT_LEGACY = """\
+Answer the question concisely based on the provided image and the following \
+context. Strictly use only the information provided in the context or visible \
+in the image.
+
+--- CONTEXT ---
+{context}
+
+--- QUESTION ---
+{question}
+
+"""

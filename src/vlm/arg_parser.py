@@ -12,6 +12,8 @@ def parse_args():
     parser.add_argument("--base-url", default="http://localhost:8000/v1")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--legacy-prompt", action="store_true",
+                        help="Prompts without the answer-format block, as before it existed.")
     parser.add_argument(
         "--use-retrieval",
         action="store_true",
@@ -33,6 +35,18 @@ def parse_args():
         "--no-rerank",
         action="store_true",
         help="Skip paragraph reranking; use the first --rerank-top-n paragraphs directly.",
+    )
+    parser.add_argument(
+        "--use-naming",
+        action="store_true",
+        help="Also enter the KB by name: ask the model what the image shows and "
+             "add the articles that name resolves to. Requires --use-retrieval.",
+    )
+    parser.add_argument(
+        "--naming-limit",
+        type=int,
+        default=3,
+        help="Articles to keep from the name lookup.",
     )
     parser.add_argument(
         "--debug-samples",
