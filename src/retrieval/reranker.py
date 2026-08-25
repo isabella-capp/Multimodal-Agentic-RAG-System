@@ -16,14 +16,20 @@ class CrossEncoderReranker:
         model_name: str = "BAAI/bge-reranker-base",
         device: str | None = None,
         max_length: int = 512,
+        dtype: torch.dtype = torch.float16,
     ):
         self.device = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
         self.max_length = max_length
 
-        print(f"Loading cross-encoder reranker {model_name} …")
+        # fp16 halves the footprint, which is what makes the larger rerankers fit:
+        # this GPU already holds vLLM (~23 GiB) and EVA-CLIP-8B (~16 GiB), and
+        # bge-reranker-v2-m3 in fp32 pushed the total to 44.34 of 44.39 GiB and
+        # OOM-killed the vLLM engine mid-run. Ranking is a comparison of logits
+        # within one query, so fp16 rounding does not move the order.
+        print(f"Loading cross-encoder reranker {model_name} ({dtype}) …")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = (
-            AutoModelForSequenceClassification.from_pretrained(model_name)
+            AutoModelForSequenceClassification.from_pretrained(model_name, dtype=dtype)
             .to(self.device)
             .eval()
         )
