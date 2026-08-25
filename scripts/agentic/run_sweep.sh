@@ -62,7 +62,7 @@ evaluate() {
     local model="$1" base_url="$2" tag="$3"
     echo "################ $tag  ($model)"
 
-    uv run python "$CODE_DIR"/src/agent/run_naming_probe.py \
+    uv run python "$CODE_DIR"/src/agent/experiments/naming_probe.py \
         --model-name "$model" --base-url "$base_url" \
         --output "$OUT_DIR/naming_${tag}.jsonl" \
         --limit "$LIMIT" --concurrency 8 || true

@@ -4,7 +4,7 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, SRC_ROOT)
 
 from langchain_core.messages import HumanMessage, SystemMessage

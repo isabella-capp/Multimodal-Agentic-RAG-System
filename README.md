@@ -152,12 +152,20 @@ src/
   paths.py prompts.py llm.py runner.py provenance.py   shared by every setting
   vlm/        arg_parser  dataset  run_inference       A and B
   agent/      prompts messages tools rag run metrics   C
-              run_inference  run_naming_probe
+              run_inference
   retrieval/  retriever  knowledge_base  reranker  build_kb_sqlite
+  ablation/   parameter sweeps over B
+
+  Probes live in <pkg>/experiments/ and are never on the inference path:
+  agent/experiments/      naming_probe       can the model name what it sees
+  retrieval/experiments/  compute_recall*    recall@k of the image index, and query variants
+                          compare_rerankers  which cross-encoder surfaces the answer
+                          analyse_pool       image or name: where the right article came from
 scripts/
   submit.sh          snapshot + submit — the way to launch
   run_abc.sh         A, B and C for one model — the reference table
   agentic/run_c.sh   C alone — one variant per run
+  baselines/run_b.sh B and B+ — the retrieval baseline, both arms in one job
   lib/vllm.sh        serving lifecycle shared by every experiment
   agentic/  baselines/  retrieval/  setup/
 ```
