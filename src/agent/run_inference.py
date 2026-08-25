@@ -36,6 +36,9 @@ def parse_args():
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--debug-samples", type=int, default=3)
     p.add_argument("--no-force-first-tool", dest="force_first", action="store_false")
+    p.add_argument("--min-names", type=int, default=1,
+                   help="Distinct lookup_article names to require before answering; "
+                        ">1 forces a second entry by name after the first search.")
     return p.parse_args()
 
 
@@ -53,7 +56,7 @@ def build_agent(args):
 
     return AgenticRAG(llm, retriever, kb, reranker, top_n=args.rerank_top_n,
                       top_k=args.top_k, max_iterations=args.max_iterations,
-                      force_first=args.force_first)
+                      force_first=args.force_first, min_names=args.min_names)
 
 
 def format_trace(messages):
@@ -128,7 +131,9 @@ def main():
     run_batch(load_todo(args.output, args.limit), predict, args.output,
               args.concurrency, setting="C", model=args.model_name,
               top_k=args.top_k, rerank_top_n=args.rerank_top_n,
-              max_iterations=args.max_iterations, force_first_tool=args.force_first)
+              max_iterations=args.max_iterations, force_first_tool=args.force_first,
+              min_names=args.min_names,
+              reranker=paths.CROSS_ENCODER_MODEL)
 
     metrics_path = args.output.rsplit(".", 1)[0] + ".metrics.json"
     metrics = summarise(runs, time.time() - t0)

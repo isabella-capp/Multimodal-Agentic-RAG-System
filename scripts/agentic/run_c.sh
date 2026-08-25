@@ -30,14 +30,23 @@ MODEL="Qwen/Qwen3-VL-8B-Instruct"
 TAG="qwen3vl8b"
 GPU_UTIL=0.50      # the retriever and reranker share this GPU
 MAX_LEN=32768
-TOP_K=20
-TOP_N=5
+TOP_K="${TOP_K:-20}"
+TOP_N="${TOP_N:-5}"
 CONCURRENCY=4
+FORCE_FIRST="${FORCE_FIRST:-1}"
+MAX_IT="${MAX_IT:-12}"
+MIN_NAMES="${MIN_NAMES:-1}"
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 VENV="/homes/$USER/vllm_venv"
 CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
-OUT_DIR="outputs/agentic/$TAG/${RUN_ID:-manual}"
+# RESUME_DIR points a new job at an earlier run's output: predictions are
+# appended and load_todo skips what is already there, so a run killed by the
+# walltime carries on instead of starting over.
+OUT_DIR="${RESUME_DIR:-outputs/agentic/$TAG/${RUN_ID:-manual}}"
+
+FORCE=()
+[ "$FORCE_FIRST" = "0" ] && FORCE=(--no-force-first-tool)
 
 if [ "${SMOKE:-0}" = "1" ]; then
     LIMIT=(--limit 5); DEBUG=5; OUT_DIR="$OUT_DIR/smoke"
@@ -48,6 +57,7 @@ fi
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
 export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
+export CROSS_ENCODER_MODEL="${CROSS_ENCODER_MODEL:-BAAI/bge-reranker-base}"
 export VLLM_USE_FLASHINFER_SAMPLER=0
 export PATH="$HOME/.local/bin:$PATH"
 export TFHUB_CACHE_DIR="/work/cvcs2026/recursive_retrievers/tfhub_cache"
@@ -59,6 +69,7 @@ cd "$PROJECT_DIR"
 mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
 source "$CODE_DIR/scripts/lib/vllm.sh"
 
+echo "reranker: $CROSS_ENCODER_MODEL   force-first: $FORCE_FIRST   min-names: $MIN_NAMES"
 ensure_vllm_venv
 serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 
@@ -66,8 +77,9 @@ echo "################ C — agentic  ($MODEL${VARIANT:+, variant $VARIANT})"
 uv run python "$CODE_DIR"/src/agent/run_inference.py \
     --model-name "$MODEL" --base-url "$BASE_URL" \
     --output "$OUT_DIR/predictions_C.jsonl" \
-    --top-k "$TOP_K" --rerank-top-n "$TOP_N" \
-    --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" "${LIMIT[@]}"
+    --top-k "$TOP_K" --rerank-top-n "$TOP_N" --max-iterations "$MAX_IT" --min-names "$MIN_NAMES" \
+    --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" \
+    "${FORCE[@]}" "${LIMIT[@]}"
 
 stop_model
 
