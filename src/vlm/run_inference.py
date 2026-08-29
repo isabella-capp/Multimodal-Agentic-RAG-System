@@ -13,7 +13,9 @@ from agent.prompts import NAMING_PROMPT
 from llm import VLMClient
 from prompts import (NO_RAG_PROMPT, NO_RAG_PROMPT_LEGACY, RAG_PROMPT,
                      RAG_PROMPT_LEGACY)
+from retrieval.bm25 import BM25Ranker
 from retrieval.knowledge_base import KnowledgeBase
+from retrieval.paragraph_ranker import rank_paragraphs
 from retrieval.retriever import Retriever
 from runner import load_todo, run_batch
 from vlm.arg_parser import parse_args
@@ -25,7 +27,8 @@ def build_rag_prompt(question, paragraphs, legacy=False):
     return template.format(context="\n\n".join(paragraphs), question=question)
 
 
-def setup_retrieval(top_k, use_cross_reranker):
+def setup_retrieval(top_k, retrieval_strategy, no_rerank):
+    """Load retriever, KB, and only the ranking components the strategy needs."""
     retriever = Retriever(
         paths.IMG_INDEX_PATH, paths.IMG_INDEX_JSON_PATH, top_k=top_k,
         device=paths.RETRIEVER_DEVICE, ef_search=paths.EF_SEARCH
@@ -33,12 +36,19 @@ def setup_retrieval(top_k, use_cross_reranker):
     retriever._ensure_index()
     retriever._ensure_model()
     kb = KnowledgeBase(paths.KB_PATH)
-    reranker = None
-    if use_cross_reranker:
-        from retrieval.reranker import CrossEncoderReranker
 
-        reranker = CrossEncoderReranker(paths.CROSS_ENCODER_MODEL, device=paths.RETRIEVER_DEVICE)
-    return retriever, kb, reranker
+    reranker = bm25 = None
+    if not no_rerank:
+        need_bm25 = retrieval_strategy in ("bm25", "bm25_bge", "rrf")
+        need_bge  = retrieval_strategy in ("bge",  "bm25_bge", "rrf")
+        if need_bm25:
+            bm25 = BM25Ranker()
+        if need_bge:
+            from retrieval.reranker import CrossEncoderReranker
+            reranker = CrossEncoderReranker(
+                paths.CROSS_ENCODER_MODEL, device=paths.RETRIEVER_DEVICE
+            )
+    return retriever, kb, reranker, bm25
 
 
 def name_entity(model, image_path):
@@ -66,18 +76,21 @@ def name_articles(kb, name, limit):
 
 
 def build_context(
-    retriever, kb, reranker, question, image_path, rerank_top_n, no_rerank,
-    extra_articles=()
+    retriever, kb, reranker, bm25, question, image_path, rerank_top_n,
+    bm25_top_m, no_rerank, extra_articles=(),
+    retrieval_strategy: str = "bm25_bge", rrf_k: int = 60,
 ):
-    """Retrieve articles for the image, pool and rerank their paragraphs.
+    """Retrieve articles for the image, pool and rank their paragraphs.
 
-    ``extra_articles`` are prepended to what the image index returns, so a second
-    entry point into the KB widens the pool instead of replacing it. The image
-    index only reaches 40.6% recall@20 because it can only rank articles that
-    have a reference image; a name resolves against the whole 2.0M-article KB.
+    ``extra_articles`` are prepended to what the image index returns, so a
+    second entry point into the KB widens the pool instead of replacing it.
 
-    Returns ``(top_paragraphs, retrieved_context)``, or ``None`` when retrieval
-    yields no usable paragraphs.
+    When ``no_rerank`` is set, the first ``rerank_top_n`` paragraphs from the
+    raw pool are returned directly (existing shortcut, preserved as-is).
+    Otherwise ``rank_paragraphs`` is called with the chosen strategy.
+
+    Returns ``(top_paragraphs, retrieved_context)``, or ``None`` when
+    retrieval yields no usable paragraphs.
     """
     user_image = Image.open(image_path).convert("RGB")
     results = retriever.retrieve(user_image, question)
@@ -96,7 +109,15 @@ def build_context(
     if no_rerank:
         top_paragraphs = pooled if rerank_top_n <= 0 else pooled[:rerank_top_n]
     else:
-        top_paragraphs = reranker.rerank(question, pooled, top_n=rerank_top_n)
+        top_paragraphs = rank_paragraphs(
+            question, pooled,
+            strategy=retrieval_strategy,
+            top_k=rerank_top_n,
+            bm25_top_m=bm25_top_m,
+            bm25_ranker=bm25,
+            reranker=reranker,
+            rrf_k=rrf_k,
+        )
 
     retrieved_context = {
         "wiki_url": results[0]["wiki_url"],
@@ -154,9 +175,11 @@ def main():
         raise SystemExit("--use-naming widens the retrieved pool; it needs --use-retrieval")
 
     model = VLMClient(args.model_name, args.base_url)
-    retriever = kb = reranker = None
+    retriever = kb = reranker = bm25 = None
     if args.use_retrieval:
-        retriever, kb, reranker = setup_retrieval(args.top_k, not args.no_rerank)
+        retriever, kb, reranker, bm25 = setup_retrieval(
+            args.top_k, args.retrieval_strategy, args.no_rerank
+        )
 
     shown = []
 
@@ -170,9 +193,12 @@ def main():
                 if args.use_naming:
                     name = name_entity(model, item["image_path"])
                     extra = name_articles(kb, name, args.naming_limit)
-                context = build_context(retriever, kb, reranker, item["question"],
-                                        item["image_path"], args.rerank_top_n,
-                                        args.no_rerank, extra)
+                context = build_context(retriever, kb, reranker, bm25,
+                                        item["question"], item["image_path"],
+                                        args.rerank_top_n, args.bm25_top_m,
+                                        args.no_rerank, extra,
+                                        retrieval_strategy=args.retrieval_strategy,
+                                        rrf_k=args.rrf_k)
                 if context is not None:
                     paragraphs, retrieved = context
                     if args.use_naming:
@@ -191,6 +217,7 @@ def main():
     run_batch(load_todo(args.output, args.limit), predict, args.output,
               args.concurrency, setting="B" if args.use_retrieval else "A",
               model=args.model_name, top_k=args.top_k, rerank_top_n=args.rerank_top_n,
+              bm25_top_m=args.bm25_top_m,
               use_naming=args.use_naming, naming_limit=args.naming_limit,
               reranker=paths.CROSS_ENCODER_MODEL,
               legacy_prompt=args.legacy_prompt)

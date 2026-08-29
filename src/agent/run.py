@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
-
+import json
 
 @dataclass
 class AgentStep:
@@ -56,6 +56,7 @@ class AgentRun:
     def from_messages(cls, messages: list) -> "AgentRun":
         """Pair each tool call with its observation, and take the last non-tool
         assistant message as the prediction."""
+        
         calls = {tc["id"]: (tc["name"], tc.get("args", {}))
                  for m in messages if isinstance(m, AIMessage)
                  for tc in m.tool_calls or []}
@@ -64,14 +65,48 @@ class AgentRun:
         for m in messages:
             if isinstance(m, ToolMessage):
                 name, args = calls.get(m.tool_call_id, (m.name, {}))
-                steps.append(AgentStep(len(steps) + 1, name, args, str(m.content)))
+                observation_text = m.content if isinstance(m.content, str) else str(m.content)
+                steps.append(AgentStep(len(steps) + 1, name, args, observation_text))
 
-        prediction = next(
-            (m.content if isinstance(m.content, str) else str(m.content)
-             for m in reversed(messages)
-             if isinstance(m, AIMessage) and not m.tool_calls),
-            None,
-        )
+        prediction = None
+        for m in reversed(messages):
+            if isinstance(m, AIMessage) and not m.tool_calls:
+                # 1. Estrazione del contenuto grezzo
+                raw_content = ""
+                if isinstance(m.content, str):
+                    raw_content = m.content
+                elif isinstance(m.content, list):
+                    raw_content = " ".join(
+                        block.get("text", "") if isinstance(block, dict) else str(block) 
+                        for block in m.content
+                    )
+                else:
+                    raw_content = str(m.content)
+                
+                try:
+                    # Rimuove eventuali blocchi markdown
+                    clean_str = raw_content.replace("```json", "").replace("```", "").strip()
+                    
+                    # Cerca la prima parentesi graffa aperta e l'ultima chiusa
+                    start_idx = clean_str.find('{')
+                    end_idx = clean_str.rfind('}')
+                    
+                    if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                        # Estrae solo la porzione che sembra un JSON
+                        json_str = clean_str[start_idx:end_idx+1]
+                        parsed = json.loads(json_str)
+                        prediction = parsed.get("answer", raw_content)
+                    else:
+                        prediction = raw_content
+                except json.JSONDecodeError:
+                    # Fallback: se la porzione estratta non è un JSON valido
+                    prediction = raw_content
+                
+                if prediction is not None:
+                    prediction = str(prediction).strip()
+                    
+                break
+
         return cls(prediction=prediction, steps=steps)
 
     @property

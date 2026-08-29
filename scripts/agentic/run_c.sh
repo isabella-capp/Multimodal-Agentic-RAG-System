@@ -31,18 +31,20 @@ TAG="qwen3vl8b"
 GPU_UTIL=0.50      # the retriever and reranker share this GPU
 MAX_LEN=32768
 TOP_K="${TOP_K:-20}"
-TOP_N="${TOP_N:-5}"
+TOP_N="${TOP_N:-20}"
+BM25_TOP_M="${BM25_TOP_M:-50}"
 CONCURRENCY=4
 FORCE_FIRST="${FORCE_FIRST:-1}"
 MAX_IT="${MAX_IT:-12}"
-MIN_NAMES="${MIN_NAMES:-1}"
+# Paragraph retrieval pipeline:
+#   bm25+reranker  — BM25 pre-filter (top-M) -> cross-encoder [default]
+#   reranker       — all paragraphs directly to cross-encoder (no BM25)
+#   rrf            — BM25 + BGE independent rankings -> Reciprocal Rank Fusion
+RETRIEVAL_MODE="${RETRIEVAL_MODE:-rrf}"
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 VENV="/homes/$USER/vllm_venv"
 CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
-# RESUME_DIR points a new job at an earlier run's output: predictions are
-# appended and load_todo skips what is already there, so a run killed by the
-# walltime carries on instead of starting over.
 OUT_DIR="${RESUME_DIR:-outputs/agentic/$TAG/${RUN_ID:-manual}}"
 
 FORCE=()
@@ -69,15 +71,19 @@ cd "$PROJECT_DIR"
 mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
 source "$CODE_DIR/scripts/lib/vllm.sh"
 
-echo "reranker: $CROSS_ENCODER_MODEL   force-first: $FORCE_FIRST   min-names: $MIN_NAMES"
+echo "reranker: $CROSS_ENCODER_MODEL   retrieval-mode: $RETRIEVAL_MODE   force-first: $FORCE_FIRST   bm25-m: $BM25_TOP_M"
 ensure_vllm_venv
 serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 
-echo "################ C — agentic  ($MODEL${VARIANT:+, variant $VARIANT})"
+echo "################ C — agentic  ($MODEL${VARIANT:+, variant $VARIANT}, retrieval-mode=$RETRIEVAL_MODE)"
+MODE_SUFFIX=""
+[ "$RETRIEVAL_MODE" != "bm25+reranker" ] && MODE_SUFFIX="_${RETRIEVAL_MODE//+/}"
 uv run python "$CODE_DIR"/src/agent/run_inference.py \
     --model-name "$MODEL" --base-url "$BASE_URL" \
-    --output "$OUT_DIR/predictions_C.jsonl" \
-    --top-k "$TOP_K" --rerank-top-n "$TOP_N" --max-iterations "$MAX_IT" --min-names "$MIN_NAMES" \
+    --output "$OUT_DIR/predictions_C${MODE_SUFFIX}.jsonl" \
+    --top-k "$TOP_K" --rerank-top-n "$TOP_N" --bm25-top-m "$BM25_TOP_M" \
+    --max-iterations "$MAX_IT" \
+    --retrieval-mode "$RETRIEVAL_MODE" \
     --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" \
     "${FORCE[@]}" "${LIMIT[@]}"
 
@@ -85,14 +91,14 @@ stop_model
 
 echo "################ scoring"
 (cd "$PROJECT_DIR/evqa_eval" && uv run python "$CODE_DIR/evqa_eval/score_evqa.py" \
-    --predictions "../$OUT_DIR/predictions_C.jsonl" \
-    --output "../$OUT_DIR/results_C.json") || true
+    --predictions "../$OUT_DIR/predictions_C${MODE_SUFFIX}.jsonl" \
+    --output "../$OUT_DIR/results_C${MODE_SUFFIX}.json") || true
 
 echo "################ summary"
-python3 -c "import json;print('  C:', json.load(open('$OUT_DIR/results_C.json'))['accuracy_overall'])" 2>/dev/null || echo "  C: n/a"
+python3 -c "import json;print('  C${MODE_SUFFIX}:', json.load(open('$OUT_DIR/results_C${MODE_SUFFIX}.json'))['accuracy_overall'])" 2>/dev/null || echo "  C${MODE_SUFFIX}: n/a"
 echo "  tool use:"
 python3 -c "
-import json; d=json.load(open('$OUT_DIR/predictions_C.metrics.json'))
+import json; d=json.load(open('$OUT_DIR/predictions_C${MODE_SUFFIX}.metrics.json'))
 print('   ', {k: d[k] for k in ('tool_called_pct','avg_tool_calls','avg_paragraphs_read','errors')})
 print('    first tool:', d['first_tool_pct'])
 for k,v in (d.get('tool_usage') or {}).items():

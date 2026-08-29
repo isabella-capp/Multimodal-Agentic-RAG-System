@@ -1,10 +1,14 @@
 ANSWER_FORMAT = """\
-Reply with ONLY the answer, as short as possible — usually a single word or a \
-short noun phrase (1-4 words). NEVER write a full sentence, NEVER restate the \
-question, NEVER use markdown, NEVER add explanations or phrases such as "Based on \
-the context". For example, answer "1889", not "The tower was completed in 1889."; \
-answer "granite", not "It is built from granite.". If several answers apply, \
-output only the answers separated by commas, like "copper, zinc"."""
+CRITICAL: When you are ready to answer the user's question, your FINAL message MUST \
+be ONLY a valid JSON object. Do not include any other text, no markdown blocks, no \
+explanations, no "Here is the answer".
+
+Use exactly this format:
+{"answer": "your concise answer here"}
+
+Example 1: {"answer": "1889"}
+Example 2: {"answer": "copper, zinc"}
+"""
 
 # A — no retrieval: the model answers from the image and its own knowledge.
 NO_RAG_PROMPT = f"""\

@@ -21,15 +21,10 @@ class CrossEncoderReranker:
         self.device = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
         self.max_length = max_length
 
-        # fp16 halves the footprint, which is what makes the larger rerankers fit:
-        # this GPU already holds vLLM (~23 GiB) and EVA-CLIP-8B (~16 GiB), and
-        # bge-reranker-v2-m3 in fp32 pushed the total to 44.34 of 44.39 GiB and
-        # OOM-killed the vLLM engine mid-run. Ranking is a comparison of logits
-        # within one query, so fp16 rounding does not move the order.
         print(f"Loading cross-encoder reranker {model_name} ({dtype}) …")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = (
-            AutoModelForSequenceClassification.from_pretrained(model_name, dtype=dtype)
+            AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=dtype)
             .to(self.device)
             .eval()
         )
@@ -37,12 +32,17 @@ class CrossEncoderReranker:
 
     @torch.inference_mode()
     def rerank(
-        self, query: str, paragraphs: list[str], top_n: int = 3, batch_size: int = 16
+        self, query: str, paragraphs: list[str], top_n: int = 3,
+        batch_size: int = 16, force_sort: bool = False,
     ) -> list[str]:
-        """Return the *top_n* paragraphs most relevant to the query."""
+        """Return the *top_n* paragraphs most relevant to the query.
+
+        When *force_sort* is True, the full pool is scored and sorted even
+        when its size is ≤ top_n (required e.g. for RRF).
+        """
         if not paragraphs:
             return []
-        if len(paragraphs) <= top_n:
+        if len(paragraphs) <= top_n and not force_sort:
             return paragraphs
 
         scores: list[float] = []

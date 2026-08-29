@@ -1,8 +1,38 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from retrieval.knowledge_base import normalize
+from retrieval.fusion import rank_paragraphs
+
+# Maps the agent-facing retrieval_mode names to paragraph_ranker strategies.
+_MODE_TO_STRATEGY = {
+    "bm25+reranker": "bm25_bge",   # current default — behaviour unchanged
+    "reranker":      "bge",
+    "rrf":           "rrf",
+}
+
+class LookupArticleInput(BaseModel):
+    name: str = Field(..., description="The exact name of the entity, person, or object to look up on Wikipedia.")
+
+class SearchParagraphsInput(BaseModel):
+    query: str = Field(..., description="A short, highly focused keyword phrase (e.g. 'Arabidopsis lyrata outcrossing') to find specific information. Do not use full sentences or questions.")
+
+class ReadArticleInput(BaseModel):
+    title: str = Field(..., description="The EXACT title of the Wikipedia article, exactly as it appeared in previous tool results.")
+    query: str = Field(..., description="The keyword phrase to search for inside this specific article.")
+
+@dataclass
+class Candidate:
+    """One article in the working set, with its provenance."""
+
+    title: str
+    wiki_url: str
+    sources: set[str] = field(default_factory=set)   # "image" | "lookup"
+    image_score: float | None = None
 
 
 def _format(paragraphs: list[tuple[str, str]]) -> str:
@@ -10,59 +40,80 @@ def _format(paragraphs: list[tuple[str, str]]) -> str:
                        for i, (title, text) in enumerate(paragraphs))
 
 
-def build_tools(retriever, kb, reranker, image, top_n=20, top_k=20, lookup_limit=5):
+def build_tools(retriever, kb, reranker, bm25, image,
+                top_n=5, top_k=20, bm25_top_m=50, lookup_limit=5,
+                retrieval_mode: str = "reranker", rrf_k: int = 60):
     """Retrieval tools for one query image, over a working set the agent grows.
 
-    Two ways in — by name (string lookup, the only channel that can beat the
-    ~47% ceiling of the image embedding) and by image — and two ways to read:
-    one chosen article, or every candidate at once.
+    Two ways into the KB — by image (EVA-CLIP/FAISS) and by name — and two
+    ways to read: search across all candidates, or read one article deeply.
+    The working set tracks how each article was found (provenance) but this
+    information is kept internal; tool outputs are unchanged.
 
-    That second reader exists because committing to a single article is where
-    the agent lost to plain RAG: it read the right one only 15.6% of the time
-    against 41.3% for a pooled rerank, and was far more accurate than RAG
-    whenever it did (0.656 vs 0.528). Pooling keeps that accuracy without
-    requiring the entity to be identified correctly first.
+    retrieval_mode controls the paragraph-level pipeline:
+      "reranker"       — all paragraphs go directly to the cross-encoder (default, current behaviour)
+      "bm25+reranker"  — BM25 pre-filter → cross-encoder 
+      "rrf"            — BM25 + BGE independent rankings → Reciprocal Rank Fusion
     """
-    working: dict[str, str] = {}
+    candidates: dict[str, Candidate] = {}   # keyed by wiki_url
     tried: set[str] = set()
     tried_raw: set[str] = set()
     cache: dict = {}
 
-    def _register(articles: list[dict]) -> None:
+    def _register_image(articles: list[dict]) -> None:
         for a in articles:
-            working[a["title"]] = a["wiki_url"]
+            url = a["wiki_url"]
+            if url in candidates:
+                candidates[url].sources.add("image")
+            else:
+                candidates[url] = Candidate(
+                    title=a["title"],
+                    wiki_url=url,
+                    sources={"image"},
+                    image_score=a.get("score"),
+                )
+
+    def _register_lookup(articles: list[dict]) -> None:
+        for a in articles:
+            url = a["wiki_url"]
+            if url in candidates:
+                candidates[url].sources.add("lookup")
+            else:
+                candidates[url] = Candidate(
+                    title=a["title"],
+                    wiki_url=url,
+                    sources={"lookup"},
+                    image_score=None,
+                )
 
     def _image_candidates() -> list[dict]:
         if "articles" not in cache:
-            cache["articles"] = retriever.search_index(retriever.encode_image(image),
-                                                       top_k=top_k)
-            _register(cache["articles"])
+            cache["articles"] = retriever.search_index(
+                retriever.encode_image(image), top_k=top_k
+            )
+            _register_image(cache["articles"])
         return cache["articles"]
 
     def _pool() -> list[tuple[str, str]]:
-        """Every paragraph of every article seen so far, tagged with its title."""
+        """Every paragraph of every article in the working set, tagged with title."""
         _image_candidates()
-        key = tuple(sorted(working.items()))
+        key = tuple(sorted((c.wiki_url, c.title) for c in candidates.values()))
         if cache.get("pool_key") != key:
-            cache["pool"] = [(title, p) for title, url in key
-                             for p in kb.get_paragraphs_by_url(wiki_url=url)]
+            cache["pool"] = [
+                (c.title, p)
+                for c in candidates.values()
+                for p in kb.get_paragraphs_by_url(wiki_url=c.wiki_url)
+            ]
             cache["pool_key"] = key
         return cache["pool"]
 
-    @tool
+    @tool(args_schema=LookupArticleInput)
     def lookup_article(name: str) -> str:
-        """Add to the search pool the article that NAME refers to.
-
-        Pass the name alone, e.g. "Northern cardinal". Whatever it resolves to
-        joins the articles that `search_paragraphs` searches — so a second call
-        with a DIFFERENT name widens the search rather than replacing it.
-
-        This is the only tool that can bring in an article the image index does
-        not have. The image index only covers articles that carry a photograph,
-        and reaches the right one 40.6% of the time; names reach 84.2% of the
-        gold articles, but one guess resolves correctly only 11.6% of the time
-        with this model. So the way to use it is several times, with genuinely
-        different names — not once.
+        """Add Wikipedia articles matching an entity name to the candidate pool.
+        
+        Use this when you want to explore a specific entity by name, or if the 
+        image search didn't give good results. Calling this multiple times with 
+        DIFFERENT names expands your search pool.
         """
         if normalize(name) in tried:
             return (f"You already tried '{name}'. Names tried so far: "
@@ -74,17 +125,16 @@ def build_tools(retriever, kb, reranker, image, top_n=20, top_k=20, lookup_limit
         if not hits:
             return (f"No article found for '{name}'. Try a different name, "
                     f"or use search_by_image to see what the image matches.")
-        _register(hits)
+        _register_lookup(hits)
         return ("Added to the search pool:\n"
                 + "\n".join(f"- {h['title']}" for h in hits))
 
     @tool
     def search_by_image() -> str:
-        """List the Wikipedia articles whose reference images resemble this image.
+        """Find candidate Wikipedia articles whose reference images are visually similar to the input image.
 
-        Use when you cannot name the entity, or to check which article the image
-        actually matches. Returns titles only — read them with `read_article` or
-        `search_paragraphs`.
+        Use this to generate candidates; do not assume the top result is correct.
+        All returned articles are added to the working set automatically.
         """
         articles = _image_candidates()
         if not articles:
@@ -92,42 +142,52 @@ def build_tools(retriever, kb, reranker, image, top_n=20, top_k=20, lookup_limit
         return "\n".join(f"{i:2d}. {a['title']}   (visual match {a['score']:.3f})"
                           for i, a in enumerate(articles, 1))
 
-    @tool
+    @tool(args_schema=ReadArticleInput)
     def read_article(title: str, query: str) -> str:
-        """Go deeper into ONE article, after `search_paragraphs` showed which.
-
-        Prefer `search_paragraphs` for the first read: it covers every candidate.
-        Use this to pull more from a single article once you know which one holds
-        the answer. `title` must be one you have already seen.
+        """Extract relevant text passages from one specific candidate article.
+        
+        Use this ONLY when you want to deeply inspect a single article that you 
+        have already discovered. It returns the most relevant paragraphs from that article.
         """
-        url = working.get(title)
+        cand = next((c for c in candidates.values() if c.title == title), None)
+        url = cand.wiki_url if cand else None
         if url is None:
             hits = kb.lookup_articles(title, limit=1)
             if not hits:
                 return (f"Unknown article '{title}'. Find it with lookup_article "
                         f"or search_by_image first.")
             url = hits[0]["wiki_url"]
+            _register_lookup(hits)
         paragraphs = kb.get_paragraphs_by_url(wiki_url=url)
         if not paragraphs:
             return f"No text available for '{title}'."
-        results = reranker.rerank(query, paragraphs, top_n=top_n)
+        strategy = _MODE_TO_STRATEGY.get(retrieval_mode, "bge")
+        results = rank_paragraphs(
+            query, paragraphs, strategy=strategy, top_k=top_n,
+            bm25_top_m=bm25_top_m, bm25_ranker=bm25, reranker=reranker,
+            rrf_k=rrf_k,
+        )
         return _format([(title, p) for p in results]) if results else \
             "No relevant paragraphs found."
 
-    @tool
+    @tool(args_schema=SearchParagraphsInput)
     def search_paragraphs(query: str) -> str:
-        """Search the passages of EVERY candidate article at once — read this first.
-
-        The normal way to gather evidence. Pass the question. Each passage is
-        labelled with the article it came from, so you find the answer and the
-        entity that owns it together, without having to pick the right article
-        beforehand.
+        """Search for relevant text passages across ALL currently loaded candidate articles.
+        
+        Use this to quickly gather facts and compare information across all the articles 
+        in your pool simultaneously. Each returned passage will tell you which article it came from.
         """
         pool = _pool()
         if not pool:
             return "No candidate articles available for this image."
         by_text = {text: title for title, text in pool}
-        best = reranker.rerank(query, [text for _, text in pool], top_n=top_n)
+        texts = [text for _, text in pool]
+        strategy = _MODE_TO_STRATEGY.get(retrieval_mode, "bge")
+        best = rank_paragraphs(
+            query, texts, strategy=strategy, top_k=top_n,
+            bm25_top_m=bm25_top_m, bm25_ranker=bm25, reranker=reranker,
+            rrf_k=rrf_k,
+        )
         return _format([(by_text.get(p, "?"), p) for p in best]) if best else \
             "No relevant paragraphs found."
 

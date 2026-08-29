@@ -32,9 +32,28 @@ def parse_args():
         help="Paragraphs to keep after reranking (or the first N with --no-rerank; <=0 keeps all).",
     )
     parser.add_argument(
+        "--bm25-top-m",
+        type=int,
+        default=50,
+        help="BM25 candidate pool size before BGE reranking (only used with reranking enabled).",
+    )
+    parser.add_argument(
         "--no-rerank",
         action="store_true",
         help="Skip paragraph reranking; use the first --rerank-top-n paragraphs directly.",
+    )
+    parser.add_argument(
+        "--retrieval-strategy",
+        default="bm25_bge",
+        choices=["bm25", "bge", "bm25_bge", "rrf"],
+        help="Paragraph retrieval strategy when --use-retrieval is active. "
+             "'bm25_bge' is the current default (BM25 pre-filter -> BGE rerank). "
+             "'bm25' uses BM25 only; 'bge' uses BGE only; 'rrf' fuses both. "
+             "Overridden by --no-rerank (which bypasses ranking entirely).",
+    )
+    parser.add_argument(
+        "--rrf-k", type=int, default=60,
+        help="RRF smoothing constant (default 60). Only used with --retrieval-strategy rrf.",
     )
     parser.add_argument(
         "--use-naming",

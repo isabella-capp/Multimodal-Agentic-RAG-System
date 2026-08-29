@@ -42,6 +42,7 @@ CONCURRENCY=8
 ARMS="${ARMS:-B Bplus}"
 TOP_K="${TOP_K:-20}"
 TOP_N="${TOP_N:-20}"
+BM25_TOP_M="${BM25_TOP_M:-50}"
 NAMING_LIMIT="${NAMING_LIMIT:-3}"
 LEGACY="${LEGACY:-0}"
 
@@ -81,11 +82,11 @@ serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 for ARM in $ARMS; do
     NAMING=()
     [ "$ARM" = "Bplus" ] && NAMING=(--use-naming --naming-limit "$NAMING_LIMIT")
-    echo "################ $ARM  (top-k=$TOP_K top-n=$TOP_N)${LEGACY:+, legacy prompt}"
+    echo "################ $ARM  (top-k=$TOP_K top-n=$TOP_N bm25-m=$BM25_TOP_M)${LEGACY:+, legacy prompt}"
     uv run python "$CODE_DIR"/src/vlm/run_inference.py \
         --model-name "$MODEL" --base-url "$BASE_URL" \
         --output "$OUT_DIR/predictions_$ARM.jsonl" \
-        --use-retrieval --top-k "$TOP_K" --rerank-top-n "$TOP_N" \
+        --use-retrieval --top-k "$TOP_K" --rerank-top-n "$TOP_N" --bm25-top-m "$BM25_TOP_M" \
         --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" \
         "${NAMING[@]}" "${PROMPT[@]}" "${LIMIT[@]}"
 done
