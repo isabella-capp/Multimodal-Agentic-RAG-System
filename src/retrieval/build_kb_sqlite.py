@@ -8,6 +8,15 @@ non-empty section text, linked by url). The text lives only in ``paragraphs``.
 A final pass adds the name-lookup tables (``aliases`` + ``titles_fts``) that
 ``KnowledgeBase.lookup_articles`` queries, so one run produces a KB the agent
 can use as-is. Use ``--index-only`` to rebuild just those on an existing KB.
+
+``--paragraphs-fts`` adds ``paragraphs_fts``, a full-text index over paragraph
+*text*, so a question can find an article without anyone naming it. It writes
+into the KB itself: one file stays the single source of truth for retrieval.
+
+Run it when nothing else is reading the KB. It takes a write lock on an 18.6 GB
+file the whole group reads, and readers must not have it open with
+``immutable=1`` — that flag promises SQLite the bytes never change, which stops
+being true here. ``KnowledgeBase`` therefore opens read-only *without* it.
 """
 
 import argparse
@@ -96,6 +105,62 @@ def build_name_index(conn):
     conn.execute("CREATE INDEX idx_aliases_alias ON aliases(alias)")
     conn.commit()
     print(f"Name index: {len(articles)} articles, {n_aliases} aliases")
+
+
+def build_paragraph_fts(db_path, overwrite):
+    """Index the text of every paragraph, in the KB, next to the other indexes.
+
+    The two channels we had both run through the model: the image index needs
+    the entity to have a photograph (40.6% recall@20) and the name lookup needs
+    the model to name it, which Qwen3-VL-8B manages 11.6% of the time. This one
+    does not — the question itself is the query.
+
+    ``content=''`` keeps the table contentless, so the text is not stored a
+    second time and only the inverted index is added. Rows are keyed by
+    ``paragraphs.id``, so a hit joins straight back to its article.
+
+    Pragmas are the safe ones on purpose: a crash during this must leave the
+    18.6 GB KB exactly as it was, which is worth more than a faster build.
+    """
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA cache_size=-262144")
+
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='paragraphs_fts'").fetchone()
+    if exists and not overwrite:
+        raise SystemExit("paragraphs_fts already exists (use --overwrite to rebuild)")
+    if exists:
+        conn.execute("DROP TABLE paragraphs_fts")
+        conn.commit()
+
+    total = conn.execute("SELECT max(id) FROM paragraphs").fetchone()[0] or 0
+    # porter stemming: questions say "sequenced", articles say "sequencing"
+    conn.execute("CREATE VIRTUAL TABLE paragraphs_fts USING fts5"
+                 "(text, content='', tokenize='porter unicode61')")
+
+    batch, n = [], 0
+    read = conn.execute("SELECT id, text FROM paragraphs")
+    write = conn.cursor()
+    for pid, text in tqdm(read, total=total, desc="Paragraphs"):
+        if not text:
+            continue
+        batch.append((pid, text))
+        n += 1
+        if len(batch) >= BATCH_SIZE * 10:
+            write.executemany("INSERT INTO paragraphs_fts(rowid, text) VALUES (?,?)", batch)
+            batch.clear()
+    if batch:
+        write.executemany("INSERT INTO paragraphs_fts(rowid, text) VALUES (?,?)", batch)
+    conn.commit()
+
+    print("Optimising the FTS index …")
+    conn.execute("INSERT INTO paragraphs_fts(paragraphs_fts) VALUES ('optimize')")
+    conn.commit()
+    conn.close()
+    print(f"Done: {n} paragraphs indexed into {db_path} "
+          f"({os.path.getsize(db_path) / 2**30:.1f} GB total)")
 
 
 def iter_rows(json_path):
@@ -188,11 +253,20 @@ def main():
         help="Rebuild even if the .db already exists.",
     )
     parser.add_argument(
+        "--paragraphs-fts",
+        action="store_true",
+        help="Add the full-text index over paragraph text to the KB.",
+    )
+    parser.add_argument(
         "--index-only",
         action="store_true",
         help="Rebuild only the name-lookup tables on an existing KB.",
     )
     args = parser.parse_args()
+
+    if args.paragraphs_fts:
+        build_paragraph_fts(KB_DB_PATH, args.overwrite)
+        return
 
     if args.index_only:
         # Safe pragmas: a crash must leave the existing KB intact.

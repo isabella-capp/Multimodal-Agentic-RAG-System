@@ -12,6 +12,9 @@ IMG_INDEX_JSON_PATH = f"{BASE_FOLDER}/knn.json"
 # End to end that is worth +1.4 to +1.8 points to every pipeline we tried, and
 # nothing at all to the agent (0.384 -> 0.382). The default stays `base` because
 # every number recorded so far was measured with it; override to compare.
+# Document frequencies for the full-text channel; see load_df_cache.
+TERM_DF_PATH = "outputs/retrieval/term_df.json"
+
 CROSS_ENCODER_MODEL = os.getenv("CROSS_ENCODER_MODEL", "BAAI/bge-reranker-base")
 RETRIEVER_DEVICE = "cuda"
 EF_SEARCH = 256  # HNSW search depth; the ~16 default under-retrieves
