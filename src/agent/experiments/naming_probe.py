@@ -1,4 +1,25 @@
+"""Can the model name the entity in the image, and does cropping help?
+
+The name is the key to the only channel with real headroom: 84.2% of the gold
+titles are resolvable by name, against 40.6% recall@20 for the image index. But
+Qwen3-VL-8B produces a name that resolves to the right article only 11.6% of the
+time, so that ceiling is out of reach.
+
+Looking at where it fails, the model is not confusing the subject with the
+background — it answers `Gila monster` for a `Tiliqua rugosa`, `Schloss
+Nordkirchen` for a `Grasten Palace`. Right kind of thing, wrong instance. So a
+crop cannot help by removing background; it can only help by *magnifying*, since
+telling those apart depends on details a downsampled image no longer carries.
+
+That is what the variants test, and why each crop is scaled back to the original
+size: the VLM allocates tokens by pixel dimensions, so a crop fed as-is would be
+seen at *fewer* tokens rather than higher magnification, testing the opposite of
+the hypothesis. `--no-upscale` runs it the naive way, to show the difference.
+"""
+
 import argparse
+import base64
+import io
 import json
 import os
 import sys
@@ -7,40 +28,86 @@ from concurrent.futures import ThreadPoolExecutor
 SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, SRC_ROOT)
 
+from PIL import Image
 from langchain_core.messages import HumanMessage, SystemMessage
 from tqdm import tqdm
 
 import paths
-from agent.messages import image_to_data_uri
-from llm import chat_model
 from agent.prompts import NAMING_PROMPT
+from llm import chat_model
 from retrieval.knowledge_base import KnowledgeBase, normalize
 from vlm.dataset import load_dataset
 
 
-def _norm_url(url: str) -> str:
-    return (url or "").rstrip("/").lower().replace("http://", "https://")
+def center_crop(img, ratio):
+    w, h = img.size
+    cw, ch = int(w * ratio), int(h * ratio)
+    l, t = (w - cw) // 2, (h - ch) // 2
+    return img.crop((l, t, l + cw, t + ch))
 
 
-def _name_one(llm, item: dict) -> str | None:
+def box_crop(img, box, pad=0.08):
+    """Crop to a detector box, with a small margin so context is not lost."""
+    w, h = img.size
+    x0, y0, x1, y1 = box
+    mx, my = (x1 - x0) * pad, (y1 - y0) * pad
+    return img.crop((max(0, x0 - mx), max(0, y0 - my),
+                     min(w, x1 + mx), min(h, y1 + my)))
+
+
+def variant_image(path, variant, boxes, upscale):
+    img = Image.open(path).convert("RGB")
+    size = img.size
+    if variant == "full":
+        return img
+    if variant.startswith("center"):
+        img = center_crop(img, int(variant[len("center"):]) / 100)
+    elif variant == "box":
+        box = boxes.get(path)
+        if not box:
+            return None       # no detection: excluded from this variant's rate
+        img = box_crop(img, box)
+    else:
+        raise ValueError(f"unknown variant {variant!r}")
+    return img.resize(size, Image.BICUBIC) if upscale else img
+
+
+def data_uri(img):
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=92)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def name_one(llm, path, variant, boxes, upscale):
     try:
+        img = variant_image(path, variant, boxes, upscale)
+        if img is None:
+            return None
         resp = llm.invoke([
             SystemMessage(content=NAMING_PROMPT),
-            HumanMessage(content=[
-                {"type": "image_url",
-                 "image_url": {"url": image_to_data_uri(item["image_path"])}},
-            ]),
+            HumanMessage(content=[{"type": "image_url",
+                                   "image_url": {"url": data_uri(img)}}]),
         ])
         return resp.content if isinstance(resp.content, str) else str(resp.content)
     except Exception:
         return None
 
 
+def norm_url(url):
+    return (url or "").rstrip("/").lower().replace("http://", "https://")
+
+
 def main():
-    p = argparse.ArgumentParser(description="Can the model name the entity in the image?")
-    p.add_argument("--model-name", default="Qwen/Qwen2.5-VL-3B-Instruct")
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--model-name", default="Qwen/Qwen3-VL-8B-Instruct")
     p.add_argument("--base-url", default="http://localhost:8000/v1")
     p.add_argument("--output", default="outputs/agentic/naming_probe.jsonl")
+    p.add_argument("--variants", default="full,center80,center60",
+                   help="comma-separated: full, center<pct>, box")
+    p.add_argument("--boxes", default=None,
+                   help="JSONL of {image_path, box:[x0,y0,x1,y1]} for the 'box' variant")
+    p.add_argument("--no-upscale", dest="upscale", action="store_false",
+                   help="feed crops at their cropped size instead of rescaling up")
     p.add_argument("--limit", type=int, default=1000)
     p.add_argument("--concurrency", type=int, default=8)
     args = p.parse_args()
@@ -48,54 +115,57 @@ def main():
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     kb = KnowledgeBase(paths.KB_PATH)
 
-    dataset = [it for it in load_dataset(json_path=paths.JSON_PATH,
-                                         base_folder=paths.BASE_FOLDER)
+    boxes = {}
+    if args.boxes and os.path.exists(args.boxes):
+        for line in open(args.boxes):
+            r = json.loads(line)
+            boxes[r["image_path"]] = r.get("box")
+        print(f"Boxes loaded: {len(boxes)}")
+
+    dataset = [it for it in load_dataset(paths.JSON_PATH, paths.BASE_FOLDER)
                if os.path.exists(it["image_path"])][: args.limit]
-    print(f"Naming {len(dataset)} images with {args.model_name}")
-
     llm = chat_model(args.model_name, args.base_url, max_tokens=32)
+    variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    print(f"Naming {len(dataset)} images, variants={variants}, upscale={args.upscale}")
 
-    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        names = list(tqdm(pool.map(lambda it: _name_one(llm, it), dataset),
-                          total=len(dataset), desc="naming"))
+    resolved_cache = {}
 
-    stats = {"exact_name": 0, "resolved": 0, "resolved_exact": 0, "resolved_fuzzy": 0,
-             "no_name": 0, "gt_in_universe": 0}
+    def resolves(name, gt_url):
+        if name not in resolved_cache:
+            resolved_cache[name] = [norm_url(h["wiki_url"])
+                                    for h in kb.lookup_articles(name, limit=3)]
+        return gt_url in resolved_cache[name]
+
+    results = {}
     with open(args.output, "w", encoding="utf-8") as out:
-        for item, name in zip(dataset, names):
-            gt_url, gt_title = _norm_url(item["wikipedia_url"]), item["wikipedia_title"]
-            in_universe = bool(kb.lookup_articles(gt_title, limit=1))
-            stats["gt_in_universe"] += in_universe
-            if not name:
-                stats["no_name"] += 1
-                hits, resolved, match = [], False, None
-            else:
-                hits = kb.lookup_articles(name, limit=5)
-                resolved = any(_norm_url(h["wiki_url"]) == gt_url for h in hits)
-                match = hits[0]["match"] if hits else None
-                stats["exact_name"] += normalize(name) == normalize(gt_title)
-                stats["resolved"] += resolved
-                if resolved and match:
-                    stats[f"resolved_{match}"] += 1
-            out.write(json.dumps({
-                "unique_id": item.get("unique_id"),
-                "gt_title": gt_title, "gt_url": item["wikipedia_url"],
-                "predicted_name": name, "match": match, "resolved": resolved,
-                "candidates": [h["title"] for h in hits],
-            }, ensure_ascii=False) + "\n")
+        for variant in variants:
+            with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+                names = list(tqdm(
+                    pool.map(lambda it: name_one(llm, it["image_path"], variant,
+                                                 boxes, args.upscale), dataset),
+                    total=len(dataset), desc=variant))
+            hit = attempted = exact = 0
+            for item, name in zip(dataset, names):
+                gt_url = norm_url(item["wikipedia_url"])
+                ok = bool(name) and resolves(name, gt_url)
+                attempted += bool(name)
+                hit += ok
+                exact += bool(name) and normalize(name) == normalize(item["wikipedia_title"])
+                out.write(json.dumps({
+                    "unique_id": item["unique_id"], "variant": variant,
+                    "gt_title": item["wikipedia_title"], "predicted_name": name,
+                    "resolved": ok,
+                }, ensure_ascii=False) + "\n")
+            results[variant] = (hit, exact, attempted, len(dataset))
 
     n = len(dataset)
-    print("=" * 62)
-    print(f"model: {args.model_name}   examples: {n}")
-    print(f"GT title resolvable by the index      : {100 * stats['gt_in_universe'] / n:5.1f}%")
-    print(f"predicted name == GT title (verbatim) : {100 * stats['exact_name'] / n:5.1f}%")
-    print(f"name RESOLVES to the GT article       : {100 * stats['resolved'] / n:5.1f}%   <- recall of lookup_article")
-    print(f"    via exact match                   : {100 * stats['resolved_exact'] / n:5.1f}%")
-    print(f"    via fuzzy match                   : {100 * stats['resolved_fuzzy'] / n:5.1f}%")
-    print(f"no name produced                      : {100 * stats['no_name'] / n:5.1f}%")
-    print("lookup ceiling w/ perfect naming      :  83.5%")
-    print("EVA-CLIP image recall@50 (reference)  :  46.7%")
-    print("=" * 62)
+    print("=" * 66)
+    print(f"model: {args.model_name}   examples: {n}   upscale: {args.upscale}")
+    print(f"{'variant':12s} {'name -> right article':>22s} {'exact title':>13s} {'answered':>10s}")
+    for v, (hit, exact, attempted, tot) in results.items():
+        print(f"{v:12s} {100 * hit / tot:21.1f}% {100 * exact / tot:12.1f}% {100 * attempted / tot:9.1f}%")
+    print(f"\nreference: image index recall@20 = 40.6%, name-lookup ceiling = 84.2%")
+    print("=" * 66)
     print(f"Per-example detail: {args.output}")
 
 
