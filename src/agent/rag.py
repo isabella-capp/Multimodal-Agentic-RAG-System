@@ -11,6 +11,7 @@ from langgraph.errors import GraphRecursionError
 
 from agent.messages import build_user_message
 from agent.prompts import SYSTEM_PROMPT
+from prompts import ANSWER_FORMAT
 from agent.run import AgentRun
 from agent.tools import build_tools
 from retrieval.bm25 import BM25Ranker
@@ -27,22 +28,26 @@ def force_first_tool() -> Any:
 
 
 def remind_original_question(original_question: str) -> Any:
-    """Re-injects the original question before the final answer."""
+    """Re-inject the question AND the answer format before the final answer.
+
+    The format block sits at the end of the system prompt, tens of thousands of
+    retrieved tokens back by the time the agent answers, and the agent ignores
+    it: every C run so far averaged 7-18 words per answer against 2.5 for the
+    same format in baseline B. That is not cosmetic — BEM pays for length, so B
+    on the short format (0.359) and C at fifteen words (0.384) were never
+    measured in the same regime. Repeating the format after each tool result is
+    what puts them back in one.
+    """
     @wrap_model_call
     def remind_question_middleware(request, handler):
         if request.messages and isinstance(request.messages[-1], ToolMessage):
-            
-            reminder_text = (
-                f"Reminder: Keep your final answer strictly focused on the "
-                f"original question: '{original_question}'"
-            )
-            reminder_msg = SystemMessage(content=reminder_text)
-            
-            # Aggiungiamo il promemoria alla fine della lista dei messaggi
-            request = request.override(messages=request.messages + [reminder_msg])
-            
+            reminder = SystemMessage(content=(
+                f"Reminder: keep your final answer strictly focused on the "
+                f"original question: '{original_question}'\n\n{ANSWER_FORMAT}"
+            ))
+            request = request.override(messages=request.messages + [reminder])
         return handler(request)
-        
+
     return remind_question_middleware
 
 class AgenticRAG:
@@ -73,7 +78,6 @@ class AgenticRAG:
         if self.force_first:
             middlewares.append(force_first_tool())
             
-        # Aggiungi il promemoria per mantenere il focus
         middlewares.append(remind_original_question(question))
         
         return middlewares

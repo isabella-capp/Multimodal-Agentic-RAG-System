@@ -51,9 +51,9 @@ FORCE=()
 [ "$FORCE_FIRST" = "0" ] && FORCE=(--no-force-first-tool)
 
 if [ "${SMOKE:-0}" = "1" ]; then
-    LIMIT=(--limit 5); DEBUG=5; OUT_DIR="$OUT_DIR/smoke"
+    LIMIT=(--limit 5); DEBUG="${DEBUG:-5}"; OUT_DIR="$OUT_DIR/smoke"
 else
-    LIMIT=(); DEBUG=25   # one-line summaries: cheap, and enough to read the tool sequences
+    LIMIT=(); DEBUG="${DEBUG:-3}"   # raise it when a variant needs its tool sequences read
 fi
 
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"

@@ -23,7 +23,7 @@ from runner import load_todo, run_batch
 from vlm.dataset import build_record
 
 MAX_TOKENS = 512
-TRACE_SAMPLES = 3
+TRACE_SAMPLES = 1   # a full trace is hundreds of lines; one is enough to eyeball
 
 
 def parse_args():
