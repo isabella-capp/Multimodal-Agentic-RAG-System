@@ -1,0 +1,30 @@
+#!/bin/bash
+#SBATCH --job-name=recall_text
+#SBATCH --partition=all_usr_prod
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/recall_text_%j.out
+#SBATCH --error=logs/recall_text_%j.err
+#SBATCH --account=cvcs2026
+#
+# What the text channel adds to the image index. CPU only: SQLite, no model.
+#
+#   scripts/submit.sh scripts/retrieval/run_recall_text.sh
+#
+# The number that decides whether this channel is worth a pipeline is not its
+# own recall but "only the text": how often it finds the article the image
+# missed. Everything else is redundant with what we already have.
+
+set -euo pipefail
+PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+CODE_DIR="${CODE_DIR:-$PROJECT_DIR}"
+export PYTHONUNBUFFERED=1
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/cvcs2026/recursive_retrievers/$USER/.uv_cache}"
+mkdir -p "$UV_CACHE_DIR"
+unset SSL_CERT_DIR
+cd "$PROJECT_DIR"; mkdir -p "${LOG_DIR:-logs}" outputs/retrieval
+uv run python "$CODE_DIR"/src/retrieval/experiments/compute_recall_text.py "$@"

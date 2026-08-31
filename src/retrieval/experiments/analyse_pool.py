@@ -30,8 +30,8 @@ def main():
     gt = {it["unique_id"]: norm(it["wikipedia_url"])
           for it in load_dataset(paths.JSON_PATH, paths.BASE_FOLDER)}
 
-    stats = {"examples": 0, "image": 0, "name": 0, "union": 0,
-             "name_only": 0, "image_only": 0, "neither": 0,
+    stats = {"examples": 0, "image": 0, "name": 0, "text": 0, "union": 0,
+             "name_only": 0, "text_only": 0, "image_only": 0, "neither": 0,
              "named": 0, "name_resolved_to_something": 0}
     with open(args.predictions, encoding="utf-8") as f:
         for line in f:
@@ -48,14 +48,18 @@ def main():
                             for c in cands if c.get("source", "image") == "image")
             named = [c for c in cands if c.get("source") == "name"]
             name_hit = any(norm(c["wiki_url"]) == target for c in named)
+            text_hit = any(norm(c["wiki_url"]) == target
+                           for c in cands if c.get("source") == "text")
             stats["named"] += bool(ctx.get("predicted_name"))
             stats["name_resolved_to_something"] += bool(named)
             stats["image"] += image_hit
             stats["name"] += name_hit
-            stats["union"] += image_hit or name_hit
-            stats["image_only"] += image_hit and not name_hit
-            stats["name_only"] += name_hit and not image_hit
-            stats["neither"] += not (image_hit or name_hit)
+            stats["text"] += text_hit
+            stats["union"] += image_hit or name_hit or text_hit
+            stats["image_only"] += image_hit and not (name_hit or text_hit)
+            stats["name_only"] += name_hit and not (image_hit or text_hit)
+            stats["text_only"] += text_hit and not (image_hit or name_hit)
+            stats["neither"] += not (image_hit or name_hit or text_hit)
 
     n = stats["examples"] or 1
     pct = {k: round(100 * v / n, 1) for k, v in stats.items() if k != "examples"}
@@ -63,9 +67,11 @@ def main():
     print(f"{args.predictions}   ({stats['examples']} examples)")
     print(f"  right article in the pool via IMAGE   : {pct['image']:5.1f}%")
     print(f"  right article in the pool via NAME    : {pct['name']:5.1f}%")
+    print(f"  right article in the pool via TEXT    : {pct['text']:5.1f}%")
     print(f"  UNION                                 : {pct['union']:5.1f}%   <- what the model sees")
     print(f"    only the image found it             : {pct['image_only']:5.1f}%")
-    print(f"    only the name found it              : {pct['name_only']:5.1f}%   <- what the name channel adds")
+    print(f"    only the name found it              : {pct['name_only']:5.1f}%")
+    print(f"    only the text found it              : {pct['text_only']:5.1f}%")
     print(f"    neither                             : {pct['neither']:5.1f}%")
     print(f"  a name was produced                   : {pct['named']:5.1f}%")
     print(f"  that name resolved to some article    : {pct['name_resolved_to_something']:5.1f}%")
