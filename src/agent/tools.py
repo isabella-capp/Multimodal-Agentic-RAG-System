@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from retrieval.knowledge_base import normalize
 from retrieval.fusion import rank_paragraphs
 
-# Maps the agent-facing retrieval_mode names to paragraph_ranker strategies.
+# Maps the agent-facing retrieval_mode names to fusion strategies.
 _MODE_TO_STRATEGY = {
     "bm25+reranker": "bm25_bge",   # current default — behaviour unchanged
     "reranker":      "bge",

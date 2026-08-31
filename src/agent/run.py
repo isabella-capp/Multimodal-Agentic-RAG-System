@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
-import json
+
+from prompts import extract_answer
 
 @dataclass
 class AgentStep:
@@ -83,25 +84,8 @@ class AgentRun:
                 else:
                     raw_content = str(m.content)
                 
-                try:
-                    # Rimuove eventuali blocchi markdown
-                    clean_str = raw_content.replace("```json", "").replace("```", "").strip()
-                    
-                    # Cerca la prima parentesi graffa aperta e l'ultima chiusa
-                    start_idx = clean_str.find('{')
-                    end_idx = clean_str.rfind('}')
-                    
-                    if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
-                        # Estrae solo la porzione che sembra un JSON
-                        json_str = clean_str[start_idx:end_idx+1]
-                        parsed = json.loads(json_str)
-                        prediction = parsed.get("answer", raw_content)
-                    else:
-                        prediction = raw_content
-                except json.JSONDecodeError:
-                    # Fallback: se la porzione estratta non è un JSON valido
-                    prediction = raw_content
-                
+                prediction = extract_answer(raw_content)
+
                 if prediction is not None:
                     prediction = str(prediction).strip()
                     

@@ -1,3 +1,5 @@
+import json
+
 ANSWER_FORMAT = """\
 CRITICAL: When you are ready to answer the user's question, your FINAL message MUST \
 be ONLY a valid JSON object. Do not include any other text, no markdown blocks, no \
@@ -10,6 +12,32 @@ Example 1: {"answer": "1889"}
 Example 2: {"answer": "copper, zinc"}
 """
 
+# The format asks for JSON, so the braces must survive `.format()` on the
+# templates below: Python reads `{"answer"}` as a replacement field and raises
+# KeyError('"answer"') on every example. Doubling them makes them literal.
+_FORMAT_LITERAL = ANSWER_FORMAT.replace("{", "{{").replace("}", "}}")
+
+
+def extract_answer(raw: str) -> str:
+    """The `answer` field of the model's JSON reply, or the reply as it came.
+
+    Shared by A, B and the agent on purpose. The extraction used to live only in
+    the agent, so the baselines scored the raw JSON against the gold answer —
+    the settings must agree on what counts as an answer or their scores are not
+    comparable.
+    """
+    if not raw:
+        return raw
+    text = raw.replace("```json", "").replace("```", "").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1]).get("answer", raw)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    return raw
+
+
 # A — no retrieval: the model answers from the image and its own knowledge.
 NO_RAG_PROMPT = f"""\
 Answer the question about the image.
@@ -17,7 +45,7 @@ Answer the question about the image.
 --- QUESTION ---
 {{question}}
 
-{ANSWER_FORMAT}"""
+{_FORMAT_LITERAL}"""
 
 # B — retrieval: the model answers from the image and the retrieved paragraphs.
 RAG_PROMPT = f"""\
@@ -30,7 +58,7 @@ that is in the context or visible in the image.
 --- QUESTION ---
 {{question}}
 
-{ANSWER_FORMAT}"""
+{_FORMAT_LITERAL}"""
 
 
 # The prompts as they were before the shared format constraint. Kept to
