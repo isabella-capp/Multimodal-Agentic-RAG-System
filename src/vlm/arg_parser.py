@@ -68,6 +68,18 @@ def parse_args():
         help="Articles to keep from the name lookup.",
     )
     parser.add_argument(
+        "--use-text",
+        action="store_true",
+        help="Also enter the KB by text: search the question against the paragraph "
+             "index and add the articles it finds. Requires --use-retrieval.",
+    )
+    parser.add_argument(
+        "--text-limit",
+        type=int,
+        default=5,
+        help="Articles to keep from the full-text search.",
+    )
+    parser.add_argument(
         "--debug-samples",
         type=int,
         default=3,

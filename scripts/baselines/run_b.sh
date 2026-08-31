@@ -16,6 +16,12 @@
 #
 #   B      image retrieval only — the reference pipeline
 #   B+     same, plus one naming call whose resolved articles join the pool
+#   Btext  same as B+, plus the question searched against the paragraph index
+#
+# The three arms are the three ways into the KB. Only the last does not go
+# through the model, and it is the one that moves the ceiling: the right article
+# is in the pool 40.6% of the time with the image alone, 46.4% adding the name,
+# 58.7% adding the text search.
 #
 # B+ differs from B by a single flag: same code path, same prompt, same
 # reranker, same top-n. It exists so the agentic comparison means something —
@@ -39,11 +45,12 @@ GPU_UTIL=0.50
 MAX_LEN=32768
 CONCURRENCY=8
 
-ARMS="${ARMS:-B Bplus}"
+ARMS="${ARMS:-B Bplus Btext}"
 TOP_K="${TOP_K:-20}"
 TOP_N="${TOP_N:-20}"
 BM25_TOP_M="${BM25_TOP_M:-50}"
 NAMING_LIMIT="${NAMING_LIMIT:-3}"
+TEXT_LIMIT="${TEXT_LIMIT:-5}"
 LEGACY="${LEGACY:-0}"
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -55,9 +62,9 @@ PROMPT=()
 [ "$LEGACY" = "1" ] && PROMPT=(--legacy-prompt)
 
 if [ "${SMOKE:-0}" = "1" ]; then
-    LIMIT=(--limit 5); DEBUG=5; OUT_DIR="$OUT_DIR/smoke"
+    LIMIT=(--limit 5); DEBUG="${DEBUG:-5}"; OUT_DIR="$OUT_DIR/smoke"
 else
-    LIMIT=(); DEBUG=10
+    LIMIT=(); DEBUG="${DEBUG:-3}"
 fi
 
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
@@ -80,15 +87,19 @@ ensure_vllm_venv
 serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 
 for ARM in $ARMS; do
-    NAMING=()
-    [ "$ARM" = "Bplus" ] && NAMING=(--use-naming --naming-limit "$NAMING_LIMIT")
-    echo "################ $ARM  (top-k=$TOP_K top-n=$TOP_N bm25-m=$BM25_TOP_M)${LEGACY:+, legacy prompt}"
+    CHANNELS=()
+    case "$ARM" in
+        Bplus) CHANNELS=(--use-naming --naming-limit "$NAMING_LIMIT") ;;
+        Btext) CHANNELS=(--use-naming --naming-limit "$NAMING_LIMIT"
+                         --use-text --text-limit "$TEXT_LIMIT") ;;
+    esac
+    echo "################ $ARM  (top-k=$TOP_K top-n=$TOP_N bm25-m=$BM25_TOP_M)$([ "$LEGACY" = 1 ] && echo ", legacy prompt")"
     uv run python "$CODE_DIR"/src/vlm/run_inference.py \
         --model-name "$MODEL" --base-url "$BASE_URL" \
         --output "$OUT_DIR/predictions_$ARM.jsonl" \
         --use-retrieval --top-k "$TOP_K" --rerank-top-n "$TOP_N" --bm25-top-m "$BM25_TOP_M" \
         --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" \
-        "${NAMING[@]}" "${PROMPT[@]}" "${LIMIT[@]}"
+        "${CHANNELS[@]}" "${PROMPT[@]}" "${LIMIT[@]}"
 done
 
 stop_model
