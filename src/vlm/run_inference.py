@@ -92,6 +92,7 @@ def build_context(
     retriever, kb, reranker, bm25, question, image_path, rerank_top_n,
     bm25_top_m, no_rerank, extra_articles=(),
     retrieval_strategy: str = "bm25_bge", rrf_k: int = 60,
+    text_gate=None, text_articles_fn=None,
 ):
     """Retrieve articles for the image, pool and rank their paragraphs.
 
@@ -119,18 +120,27 @@ def build_context(
     if not pooled:
         return None
 
-    if no_rerank:
-        top_paragraphs = pooled if rerank_top_n <= 0 else pooled[:rerank_top_n]
-    else:
-        top_paragraphs = rank_paragraphs(
-            question, pooled,
-            strategy=retrieval_strategy,
-            top_k=rerank_top_n,
-            bm25_top_m=bm25_top_m,
-            bm25_ranker=bm25,
-            reranker=reranker,
-            rrf_k=rrf_k,
-        )
+    def rank(pool):
+        if no_rerank:
+            return pool if rerank_top_n <= 0 else pool[:rerank_top_n]
+        return rank_paragraphs(
+            question, pool, strategy=retrieval_strategy, top_k=rerank_top_n,
+            bm25_top_m=bm25_top_m, bm25_ranker=bm25, reranker=reranker, rrf_k=rrf_k)
+
+    top_paragraphs = rank(pooled)
+
+    gate_open = False
+    if text_gate is not None and text_articles_fn is not None:
+        score = getattr(reranker, "last_top_score", None)
+        gate_open = score is None or score < text_gate
+        if gate_open:
+            extra = [a for a in text_articles_fn()
+                     if a["wiki_url"] not in {r["wiki_url"] for r in results}]
+            if extra:
+                results = results + extra
+                pooled = pooled + [p for a in extra
+                                   for p in kb.get_paragraphs_by_url(a["wiki_url"])]
+                top_paragraphs = rank(pooled)
 
     retrieved_context = {
         "wiki_url": results[0]["wiki_url"],
@@ -145,6 +155,9 @@ def build_context(
             }
             for r in results
         ],
+        # None where no gate is configured, so a closed gate is not confused
+        # with an arm that never had one
+        "text_gate_open": gate_open if text_gate is not None else None,
         "num_paragraphs_total": len(pooled),
         "num_paragraphs_used": len(top_paragraphs),
     }
@@ -212,14 +225,17 @@ def main():
                 if args.use_naming:
                     name = name_entity(model, item["image_path"])
                     extra = name_articles(kb, name, args.naming_limit)
-                if args.use_text:
+                if args.use_text and args.text_gate is None:
                     extra = extra + text_articles(kb, item["question"], args.text_limit)
                 context = build_context(retriever, kb, reranker, bm25,
                                         item["question"], item["image_path"],
                                         args.rerank_top_n, args.bm25_top_m,
                                         args.no_rerank, extra,
                                         retrieval_strategy=args.retrieval_strategy,
-                                        rrf_k=args.rrf_k)
+                                        rrf_k=args.rrf_k,
+                                        text_gate=args.text_gate if args.use_text else None,
+                                        text_articles_fn=lambda: text_articles(
+                                            kb, item["question"], args.text_limit))
                 if context is not None:
                     paragraphs, retrieved = context
                     if args.use_naming:
@@ -242,6 +258,7 @@ def main():
               bm25_top_m=args.bm25_top_m,
               use_naming=args.use_naming, naming_limit=args.naming_limit,
               use_text=args.use_text, text_limit=args.text_limit,
+              text_gate=args.text_gate,
               reranker=paths.CROSS_ENCODER_MODEL,
               legacy_prompt=args.legacy_prompt)
     print(f"Done. Predictions saved to {args.output}")

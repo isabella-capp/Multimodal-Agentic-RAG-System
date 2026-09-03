@@ -80,6 +80,15 @@ def parse_args():
         help="Articles to keep from the full-text search.",
     )
     parser.add_argument(
+        "--text-gate",
+        type=float,
+        default=None,
+        help="Only search the KB by text when the best paragraph of the image pool "
+             "scores below this (cross-encoder logit). Below -1 the pool holds the "
+             "gold article 4-40%% of the time and the text channel supplies it; "
+             "above, it holds it 46-62%% and the channel only adds noise.",
+    )
+    parser.add_argument(
         "--debug-samples",
         type=int,
         default=3,

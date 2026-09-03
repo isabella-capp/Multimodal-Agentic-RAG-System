@@ -17,11 +17,24 @@
 #   B      image retrieval only — the reference pipeline
 #   B+     same, plus one naming call whose resolved articles join the pool
 #   Btext  same as B+, plus the question searched against the paragraph index
+#   Bgated same channels as Btext, but the text search runs only where the first
+#          pass looks empty-handed
 #
 # The three arms are the three ways into the KB. Only the last does not go
 # through the model, and it is the one that moves the ceiling: the right article
 # is in the pool 40.6% of the time with the image alone, 46.4% adding the name,
 # 58.7% adding the text search.
+#
+# Btext runs the text search on every example, which is why Bgated exists: it
+# took the pool from 133 paragraphs to 197 while the cross-encoder still returns
+# twenty, so the channel gained 55 points where it alone found the article and
+# lost 9 on the 465 where the article was already there — a wash.
+#
+# Merging the channels by rank into a pool of fixed size was tried first and is
+# worse than either: capped at twenty articles, every text or name article
+# displaces an image one and image coverage fell from 41.1% to 26.8%. The pool
+# is not the thing to shrink. Bgated runs the second channel only where the
+# first pass scores badly, which keeps the coverage and skips most of the noise.
 #
 # B+ differs from B by a single flag: same code path, same prompt, same
 # reranker, same top-n. It exists so the agentic comparison means something —
@@ -45,12 +58,14 @@ GPU_UTIL=0.50
 MAX_LEN=32768
 CONCURRENCY=8
 
-ARMS="${ARMS:-B Bplus Btext}"
+ARMS="${ARMS:-B Bplus Btext Bgated}"
 TOP_K="${TOP_K:-20}"
 TOP_N="${TOP_N:-20}"
 BM25_TOP_M="${BM25_TOP_M:-50}"
 NAMING_LIMIT="${NAMING_LIMIT:-3}"
 TEXT_LIMIT="${TEXT_LIMIT:-5}"
+POOL_ARTICLES="${POOL_ARTICLES:-20}"
+TEXT_GATE="${TEXT_GATE:--1}"
 LEGACY="${LEGACY:-0}"
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -92,6 +107,9 @@ for ARM in $ARMS; do
         Bplus) CHANNELS=(--use-naming --naming-limit "$NAMING_LIMIT") ;;
         Btext) CHANNELS=(--use-naming --naming-limit "$NAMING_LIMIT"
                          --use-text --text-limit "$TEXT_LIMIT") ;;
+        Bgated) CHANNELS=(--use-naming --naming-limit "$NAMING_LIMIT"
+                          --use-text --text-limit "$TEXT_LIMIT"
+                          --text-gate "$TEXT_GATE") ;;
     esac
     echo "################ $ARM  (top-k=$TOP_K top-n=$TOP_N bm25-m=$BM25_TOP_M)$([ "$LEGACY" = 1 ] && echo ", legacy prompt")"
     uv run python "$CODE_DIR"/src/vlm/run_inference.py \
