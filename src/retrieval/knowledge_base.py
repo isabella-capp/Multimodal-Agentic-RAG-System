@@ -119,7 +119,16 @@ class KnowledgeBase:
         return [r[0] for r in rows]
 
     def lookup_articles(self, name: str, limit: int = 5) -> list[dict]:
-        """Articles whose title matches ``name``; an exact match returns one."""
+        """Articles whose title matches ``name``; an exact match returns one.
+
+        Fallback order when no exact alias is found:
+        1. Fuzzy title match (Jaccard on ``titles_fts`` token overlap).
+        2. Intro-text match: BM25 on the first section (section_idx=0) of
+           every article via ``paragraphs_fts``.  The first section is
+           typically an abstract/summary, so the name can appear there even
+           when the Wikipedia title differs from the common name the model
+           uses.  The two hit lists are merged, title hits first.
+        """
         query = normalize(name)
         if not query:
             return []
@@ -133,7 +142,18 @@ class KnowledgeBase:
             ).fetchone()
             if row:
                 return [{"title": row[0], "wiki_url": row[1], "match": "exact"}]
-        return self._fuzzy(query, limit)
+
+        title_hits = self._fuzzy(query, limit)
+        intro_hits = self._fuzzy_intro(query, limit)
+
+        # Merge: prefer title hits, append intro-only hits not already found.
+        seen = {h["wiki_url"] for h in title_hits}
+        merged = list(title_hits)
+        for h in intro_hits:
+            if h["wiki_url"] not in seen:
+                merged.append(h)
+                seen.add(h["wiki_url"])
+        return merged[:limit]
 
     def __contains__(self, wiki_url: str) -> bool:
         row = self._conn().execute(
@@ -256,3 +276,46 @@ class KnowledgeBase:
 
         ranked.sort(key=lambda r: (-r[0], r[1]))
         return [{"title": t, "wiki_url": u, "match": "fuzzy"} for _, _, t, u in ranked[:limit]]
+
+    def _fuzzy_intro(self, query: str, limit: int) -> list[dict]:
+            """Fuzzy article lookup via BM25 on the first section of each article.
+
+            The first section (section_idx=0) of a Wikipedia article is typically
+            a short abstract/summary, so the name the model extracts is more likely
+            to appear there than in the title alone.  Uses the existing
+            ``paragraphs_fts`` index (no DB rebuild required), filtered to
+            ``section_idx = 0`` by joining back to ``paragraphs``.
+
+            Returns an empty list when ``paragraphs_fts`` is absent.
+            """
+            if not self._has_text_index:
+                return []
+            tokens = {t for t in normalize(query).split()
+                    if len(t) > 1 and t not in _STOP}
+            if not tokens:
+                return []
+            conn = self._conn()
+            expr = " OR ".join(sorted(tokens))
+            # paragraphs_fts.rowid == paragraphs.id (set at insert time).
+            # bm25() works on the FTS table in FROM; joining paragraphs only
+            # to filter section_idx and retrieve the article url/title.
+            rows = conn.execute(
+                "SELECT a.title, p.url, bm25(paragraphs_fts) AS score "
+                "FROM paragraphs_fts "
+                "JOIN paragraphs p ON p.id = paragraphs_fts.rowid "
+                "JOIN articles a ON a.url = p.url "
+                "WHERE paragraphs_fts MATCH ? AND p.section_idx = 0 "
+                "ORDER BY score LIMIT ?",
+                (expr, _FUZZY_CANDIDATES),
+            ).fetchall()
+
+            # bm25 lower is better; deduplicate by url, keep first (best) hit.
+            seen: set[str] = set()
+            results: list[dict] = []
+            for title, url, _ in rows:
+                if url not in seen:
+                    seen.add(url)
+                    results.append({"title": title, "wiki_url": url, "match": "intro"})
+                if len(results) >= limit:
+                    break
+            return results

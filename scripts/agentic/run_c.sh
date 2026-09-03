@@ -7,17 +7,23 @@
 #SBATCH --constraint=gpu_A40_45G|gpu_L40S_45G
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=01:30:00
+#SBATCH --time=4:00:00
 #SBATCH --output=logs/agentic_%j.out
 #SBATCH --error=logs/agentic_%j.err
 #SBATCH --account=cvcs2026
 #
 # Setting C alone, for iterating on the agent. A and B do not touch the agent's
 # code, so re-running them per variant would spend two thirds of a job
-# reproducing numbers we already have — use scripts/run_abc.sh for the reference
-# table, this one for every attempt after it.
+# reproducing numbers we already have.
 #
+# Usage:
 #   VARIANT=hedge scripts/submit.sh scripts/agentic/run_c.sh
+#
+#   # Enable GroundingDINO crop retrieval (full + crop fused with RRF):
+#   VISUAL_MODE=both scripts/submit.sh scripts/agentic/run_c.sh
+#
+#   # Crop only (no full-image retrieval):
+#   VISUAL_MODE=crop_only scripts/submit.sh scripts/agentic/run_c.sh
 #
 # Run the full 1000 by default. Loading vLLM, EVA-CLIP, FAISS and the reranker
 # costs ~14 minutes whatever you do, while inference over all 1000 examples takes
@@ -37,10 +43,18 @@ CONCURRENCY=4
 FORCE_FIRST="${FORCE_FIRST:-1}"
 MAX_IT="${MAX_IT:-12}"
 # Paragraph retrieval pipeline:
-#   bm25+reranker  — BM25 pre-filter (top-M) -> cross-encoder [default]
-#   reranker       — all paragraphs directly to cross-encoder (no BM25)
-#   rrf            — BM25 + BGE independent rankings -> Reciprocal Rank Fusion
-RETRIEVAL_MODE="${RETRIEVAL_MODE:-rrf}"
+#   bm25+reranker  -- BM25 pre-filter (top-M) -> cross-encoder
+#   reranker       -- all paragraphs directly to cross-encoder [default]
+#   rrf            -- BM25 + BGE independent rankings -> Reciprocal Rank Fusion
+RETRIEVAL_MODE="${RETRIEVAL_MODE:-reranker}"
+# Visual retrieval mode for search_by_image:
+#   image_only  -- full image EVA-CLIP embedding only [default, no GroundingDINO]
+#   crop_only   -- GroundingDINO crop embedding only (agent provides entity name)
+#   both        -- full image + crop fused with RRF  (agent provides entity name)
+VISUAL_MODE="${VISUAL_MODE:-image_only}"
+# GroundingDINO model to use when VISUAL_MODE != image_only.
+# grounding-dino-tiny (~340 MB) is the default; override with grounding-dino-base.
+GROUNDING_MODEL_ID="${GROUNDING_MODEL:-IDEA-Research/grounding-dino-tiny}"
 
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 VENV="/homes/$USER/vllm_venv"
@@ -57,9 +71,13 @@ else
 fi
 
 export HF_HOME="/work/cvcs2026/recursive_retrievers/hf_cache/huggingface"
-export HF_HUB_OFFLINE=1
+# HF_HUB_OFFLINE: keep offline for most models; GroundingDINO is fetched from
+# the shared HF cache (already downloaded on first run with VISUAL_MODE != image_only).
+#export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
 export CROSS_ENCODER_MODEL="${CROSS_ENCODER_MODEL:-BAAI/bge-reranker-base}"
+export GROUNDING_MODEL="$GROUNDING_MODEL_ID"
+export GROUNDING_DEVICE="${GROUNDING_DEVICE:-cpu}"  # CPU avoids VRAM contention
 export VLLM_USE_FLASHINFER_SAMPLER=0
 export PATH="$HOME/.local/bin:$PATH"
 export TFHUB_CACHE_DIR="/work/cvcs2026/recursive_retrievers/tfhub_cache"
@@ -71,19 +89,21 @@ cd "$PROJECT_DIR"
 mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
 source "$CODE_DIR/scripts/lib/vllm.sh"
 
-echo "reranker: $CROSS_ENCODER_MODEL   retrieval-mode: $RETRIEVAL_MODE   force-first: $FORCE_FIRST   bm25-m: $BM25_TOP_M"
+echo "reranker: $CROSS_ENCODER_MODEL   retrieval-mode: $RETRIEVAL_MODE   visual-mode: $VISUAL_MODE   force-first: $FORCE_FIRST   bm25-m: $BM25_TOP_M"
 ensure_vllm_venv
 serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 
-echo "################ C — agentic  ($MODEL${VARIANT:+, variant $VARIANT}, retrieval-mode=$RETRIEVAL_MODE)"
+echo "################ C — agentic  ($MODEL${VARIANT:+, variant $VARIANT}, retrieval-mode=$RETRIEVAL_MODE, visual-mode=$VISUAL_MODE)"
 MODE_SUFFIX=""
 [ "$RETRIEVAL_MODE" != "bm25+reranker" ] && MODE_SUFFIX="_${RETRIEVAL_MODE//+/}"
+[ "$VISUAL_MODE" != "image_only" ]       && MODE_SUFFIX="${MODE_SUFFIX}_${VISUAL_MODE}"
 uv run python "$CODE_DIR"/src/agent/run_inference.py \
     --model-name "$MODEL" --base-url "$BASE_URL" \
     --output "$OUT_DIR/predictions_C${MODE_SUFFIX}.jsonl" \
     --top-k "$TOP_K" --rerank-top-n "$TOP_N" --bm25-top-m "$BM25_TOP_M" \
     --max-iterations "$MAX_IT" \
     --retrieval-mode "$RETRIEVAL_MODE" \
+    --visual-mode "$VISUAL_MODE" \
     --concurrency "$CONCURRENCY" --debug-samples "$DEBUG" \
     "${FORCE[@]}" "${LIMIT[@]}"
 

@@ -16,6 +16,7 @@ import paths
 from agent.metrics import summarise
 from agent.rag import AgenticRAG
 from llm import chat_model
+from retrieval.grounding import Grounder
 from retrieval.knowledge_base import KnowledgeBase
 from retrieval.reranker import CrossEncoderReranker
 from retrieval.retriever import Retriever
@@ -48,6 +49,19 @@ def parse_args():
                         "'rrf' fuses BM25 and BGE rankings via Reciprocal Rank Fusion.")
     p.add_argument("--rrf-k", type=int, default=60,
                    help="RRF smoothing constant (default 60). Only used with --retrieval-mode rrf.")
+    p.add_argument("--grounding-model", default=None,
+                   help="GroundingDINO model ID override (default: paths.GROUNDING_MODEL).")
+    p.add_argument("--visual-mode", default="image_only",
+                   choices=["image_only", "crop_only", "both"],
+                   help="Visual retrieval strategy for search_by_image: "
+                        "'image_only' -- full image embedding only (default, backward-compat); "
+                        "'crop_only'  -- GroundingDINO crop embedding only (name required); "
+                        "'both'       -- full image + crop, fused with RRF (name required). "
+                        "GroundingDINO is loaded automatically when mode != 'image_only'.")
+    # Deprecated flag: kept for compatibility with existing submit scripts.
+    p.add_argument("--no-grounding", dest="_no_grounding_legacy", action="store_true",
+                   help="[DEPRECATED] Use --visual-mode image_only instead.")
+    p.set_defaults(_no_grounding_legacy=False)
     return p.parse_args()
 
 
@@ -63,12 +77,29 @@ def build_agent(args):
     kb = KnowledgeBase(paths.KB_PATH)
     reranker = CrossEncoderReranker(paths.CROSS_ENCODER_MODEL, device=paths.RETRIEVER_DEVICE)
 
+    # Honour deprecated --no-grounding by forcing image_only
+    visual_mode = args.visual_mode
+    if args._no_grounding_legacy and visual_mode != "image_only":
+        print("WARNING: --no-grounding overrides --visual-mode to 'image_only'.")
+        visual_mode = "image_only"
+
+    grounder = None
+    if visual_mode != "image_only":
+        model_id = args.grounding_model or paths.GROUNDING_MODEL
+        grounder = Grounder(model_id=model_id, device=paths.GROUNDING_DEVICE)
+        print(f"GroundingDINO: {model_id} on {paths.GROUNDING_DEVICE} "
+              f"(lazy load, visual_mode={visual_mode!r})")
+    else:
+        print(f"visual_mode=image_only -- GroundingDINO not loaded.")
+
     return AgenticRAG(llm, retriever, kb, reranker, top_n=args.rerank_top_n,
                       top_k=args.top_k, bm25_top_m=args.bm25_top_m,
                       max_iterations=args.max_iterations,
                       force_first=args.force_first,
                       retrieval_mode=args.retrieval_mode,
-                      rrf_k=args.rrf_k)
+                      rrf_k=args.rrf_k,
+                      grounder=grounder,
+                      visual_mode=visual_mode)
 
 
 def format_trace(messages) -> str:
@@ -170,6 +201,8 @@ def main():
         reranker=paths.CROSS_ENCODER_MODEL,
         retrieval_mode=args.retrieval_mode,
         rrf_k=args.rrf_k,
+        visual_mode=args.visual_mode,
+        grounding_model=args.grounding_model or paths.GROUNDING_MODEL,
     )
 
     metrics_path = str(Path(args.output).with_suffix(".metrics.json"))

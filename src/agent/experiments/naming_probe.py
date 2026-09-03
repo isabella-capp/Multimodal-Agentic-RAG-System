@@ -89,7 +89,8 @@ def name_one(llm, path, variant, boxes, upscale):
                                    "image_url": {"url": data_uri(img)}}]),
         ])
         return resp.content if isinstance(resp.content, str) else str(resp.content)
-    except Exception:
+    except Exception as e:
+        print(f"Error on {path}: {type(e).__name__}: {e}") # <-- AGGIUNTA PER DEBUG
         return None
 
 

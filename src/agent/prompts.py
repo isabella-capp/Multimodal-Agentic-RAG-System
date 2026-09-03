@@ -13,7 +13,8 @@ to form hypotheses. This is just a search key.
 passage retrieved in THIS conversation. Never answer from memory.
 
 Strategy and Workflow:
-1. Look at the image, form an entity hypothesis, and call `search_by_image`.
+1. Look at the image, form an entity hypothesis, and call `search_by_image`. \
+If the tool requires a `name` argument, pass your best entity guess.
 2. Call `lookup_article` with your best visual guess to ensure it is in the pool.
 3. Call `search_paragraphs` with a short, highly focused keyword query.
 4. If you find the exact answer in the retrieved passages, STOP SEARCHING IMMEDIATELY \

@@ -15,6 +15,7 @@ from prompts import ANSWER_FORMAT
 from agent.run import AgentRun
 from agent.tools import build_tools
 from retrieval.bm25 import BM25Ranker
+from retrieval.grounding import Grounder
 
 def force_first_tool() -> Any:
     """Forces the LLM to call a tool on its very first conversational turn."""
@@ -59,7 +60,9 @@ class AgenticRAG:
 
     def __init__(self, llm, retriever, kb, reranker, top_n=5, top_k=20,
                  bm25_top_m=50, max_iterations=8, force_first=True,
-                 retrieval_mode: str = "bm25+reranker", rrf_k: int = 60):
+                 retrieval_mode: str = "bm25+reranker", rrf_k: int = 60,
+                 grounder: Grounder | None = None,
+                 visual_mode: str = "image_only"):
         self.llm = llm
         self.retriever = retriever
         self.kb = kb
@@ -72,6 +75,8 @@ class AgenticRAG:
         self.force_first = force_first
         self.retrieval_mode = retrieval_mode
         self.rrf_k = rrf_k
+        self.grounder = grounder
+        self.visual_mode = visual_mode
 
     def _middleware(self, question: str) -> list[Any]:
         middlewares = []
@@ -96,7 +101,9 @@ class AgenticRAG:
                               image, top_n=self.top_n, top_k=self.top_k,
                               bm25_top_m=self.bm25_top_m,
                               retrieval_mode=self.retrieval_mode,
-                              rrf_k=self.rrf_k),
+                              rrf_k=self.rrf_k,
+                              grounder=self.grounder,
+                              visual_mode=self.visual_mode),
             system_prompt=SYSTEM_PROMPT,
             middleware=self._middleware(question),
         )
