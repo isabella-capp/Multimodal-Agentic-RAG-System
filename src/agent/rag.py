@@ -6,11 +6,11 @@ from typing import Callable, Any
 from PIL import Image
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
-from langchain_core.messages import ToolMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
 from agent.messages import build_user_message
-from agent.prompts import SYSTEM_PROMPT
+from agent.prompts import SYSTEM_PROMPT, TEXT_TOOL_SECTION
 from prompts import ANSWER_FORMAT
 from agent.run import AgentRun
 from agent.tools import build_tools
@@ -50,6 +50,58 @@ def remind_original_question(original_question: str) -> Any:
 
     return remind_question_middleware
 
+def require_tool_before_answer(tool_name: str, max_calls: int = 3) -> Any:
+    """Do not let the agent answer until it has called ``tool_name`` once.
+
+    The same lever as `require_distinct_names`, for the same reason: the agent
+    is told when a tool would help and does not act on it — a `verify` tool
+    reported NOT CONFIRMED on 64.5% of examples and the agent changed course on
+    0.2% of those. Forcing the call separates "the tool does not help" from "the
+    agent does not use it", which are very different conclusions.
+    """
+    @wrap_model_call
+    def middleware(request, handler):
+        if should_force(request.messages, tool_name):
+            return handler(request.override(tool_choice=tool_name))
+        return handler(request)
+
+    return middleware
+
+
+def open_text_gate(state: dict, tool_name: str, threshold: float) -> Any:
+    """Force ``tool_name`` only where the pool looks like it lacks the answer.
+
+    The agentic version of the pipeline's second round, and the same trigger: a
+    measured score rather than the model's own sense of whether it has enough,
+    which failed in five separate experiments. What differs from the pipeline is
+    the query — the agent writes `Phyllanthus niruri` where the pipeline can
+    only pass "this plant", and this channel lives on rare words.
+    """
+    @wrap_model_call
+    def middleware(request, handler):
+        score = state.get("top_score")
+        if score is not None and score < threshold and should_force(
+                request.messages, tool_name):
+            return handler(request.override(tool_choice=tool_name))
+        return handler(request)
+
+    return middleware
+
+
+def should_force(messages, tool_name: str) -> bool:
+    """True while the agent has read a tool result but never called ``tool_name``.
+
+    Split out of the middleware so it can be tested without a model: the last
+    version of this shipped with an undefined name and failed on all 1000
+    examples, which a two-line check would have caught.
+    """
+    if not any(isinstance(m, ToolMessage) for m in messages):
+        return False        # first turn: force_first_tool's job, not ours
+    called = sum(1 for m in messages if isinstance(m, AIMessage)
+                 for tc in (m.tool_calls or []) if tc["name"] == tool_name)
+    return called == 0
+
+
 class AgenticRAG:
     """Runs the agentic RAG loop for one example at a time.
 
@@ -59,7 +111,9 @@ class AgenticRAG:
 
     def __init__(self, llm, retriever, kb, reranker, top_n=5, top_k=20,
                  bm25_top_m=50, max_iterations=8, force_first=True,
-                 retrieval_mode: str = "bm25+reranker", rrf_k: int = 60):
+                 retrieval_mode: str = "bm25+reranker", rrf_k: int = 60,
+                 with_text: bool = False, text_limit: int = 5,
+                 force_text: bool = False, text_gate: float | None = None):
         self.llm = llm
         self.retriever = retriever
         self.kb = kb
@@ -72,18 +126,26 @@ class AgenticRAG:
         self.force_first = force_first
         self.retrieval_mode = retrieval_mode
         self.rrf_k = rrf_k
+        self.with_text = with_text
+        self.text_limit = text_limit
+        self.force_text = force_text
+        self.text_gate = text_gate
 
-    def _middleware(self, question: str) -> list[Any]:
+    def _middleware(self, question: str, state: dict) -> list[Any]:
         middlewares = []
         if self.force_first:
             middlewares.append(force_first_tool())
-            
+        if self.with_text and self.text_gate is not None:
+            middlewares.append(open_text_gate(state, "search_by_text", self.text_gate))
+        elif self.force_text and self.with_text:
+            middlewares.append(require_tool_before_answer("search_by_text"))
         middlewares.append(remind_original_question(question))
-        
         return middlewares
 
     def run(self, image_path: str, question: str) -> AgentRun:
         t0 = time.time()
+
+        state: dict = {}   # per example: the tools write into it, the middleware reads
 
         try:
             image = Image.open(image_path).convert("RGB")
@@ -96,9 +158,12 @@ class AgenticRAG:
                               image, top_n=self.top_n, top_k=self.top_k,
                               bm25_top_m=self.bm25_top_m,
                               retrieval_mode=self.retrieval_mode,
-                              rrf_k=self.rrf_k),
-            system_prompt=SYSTEM_PROMPT,
-            middleware=self._middleware(question),
+                              rrf_k=self.rrf_k,
+                              with_text=self.with_text,
+                              text_limit=self.text_limit,
+                              state=state),
+            system_prompt=SYSTEM_PROMPT + (TEXT_TOOL_SECTION if self.with_text else ""),
+            middleware=self._middleware(question, state),
         )
 
         try:

@@ -34,3 +34,23 @@ Wikipedia article would have.
 
 Reply with ONLY that name. No article, no description, no explanation, no \
 punctuation. If you are unsure, still give your best guess."""
+
+
+# Appended to SYSTEM_PROMPT only when the agent is given `search_by_text`, so
+# the prompt never names a tool that is not there.
+TEXT_TOOL_SECTION = """
+
+You also have `search_by_text`, which finds articles by what is WRITTEN in them \
+rather than by the picture. It is the one way in that does not depend on \
+recognising the subject.
+
+Use it when the passages you have read turn out to be about the wrong entity, \
+or when you cannot name what you see but the question mentions something \
+concrete. What matters is the words you choose: it finds the article about six \
+times in ten when the query holds something distinctive — a species name, a \
+place, a date, a measurement, a technical term — and almost never when the \
+query is made of common words like "large", "population" or "typically".
+
+You are better placed than the question itself here. If the picture shows a \
+sparrow and the question only says "this bird", search for "sparrow" plus \
+whatever the question does make specific."""

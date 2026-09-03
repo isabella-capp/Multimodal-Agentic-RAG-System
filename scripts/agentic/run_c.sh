@@ -35,6 +35,9 @@ TOP_N="${TOP_N:-20}"
 BM25_TOP_M="${BM25_TOP_M:-50}"
 CONCURRENCY=4
 FORCE_FIRST="${FORCE_FIRST:-1}"
+WITH_TEXT="${WITH_TEXT:-0}"
+FORCE_TEXT="${FORCE_TEXT:-0}"
+TEXT_GATE="${TEXT_GATE:-}"
 MAX_IT="${MAX_IT:-12}"
 # Paragraph retrieval pipeline:
 #   bm25+reranker  — BM25 pre-filter (top-M) -> cross-encoder [default]
@@ -49,6 +52,9 @@ OUT_DIR="${RESUME_DIR:-outputs/agentic/$TAG/${RUN_ID:-manual}}"
 
 FORCE=()
 [ "$FORCE_FIRST" = "0" ] && FORCE=(--no-force-first-tool)
+[ "$WITH_TEXT" = "1" ] && FORCE+=(--with-text)
+[ "$FORCE_TEXT" = "1" ] && FORCE+=(--with-text --force-text)
+[ -n "$TEXT_GATE" ] && FORCE+=(--with-text --text-gate "$TEXT_GATE")
 
 if [ "${SMOKE:-0}" = "1" ]; then
     LIMIT=(--limit 5); DEBUG="${DEBUG:-5}"; OUT_DIR="$OUT_DIR/smoke"
@@ -71,7 +77,7 @@ cd "$PROJECT_DIR"
 mkdir -p "${LOG_DIR:-logs}" "$OUT_DIR"
 source "$CODE_DIR/scripts/lib/vllm.sh"
 
-echo "reranker: $CROSS_ENCODER_MODEL   retrieval-mode: $RETRIEVAL_MODE   force-first: $FORCE_FIRST   bm25-m: $BM25_TOP_M"
+echo "reranker: $CROSS_ENCODER_MODEL   retrieval-mode: $RETRIEVAL_MODE   force-first: $FORCE_FIRST   bm25-m: $BM25_TOP_M   text: $WITH_TEXT/$FORCE_TEXT"
 ensure_vllm_venv
 serve_model "$MODEL" "$GPU_UTIL" "$MAX_LEN"
 

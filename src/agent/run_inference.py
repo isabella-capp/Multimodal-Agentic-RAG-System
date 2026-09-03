@@ -40,6 +40,16 @@ def parse_args():
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--debug-samples", type=int, default=3)
     p.add_argument("--no-force-first-tool", dest="force_first", action="store_false")
+    p.add_argument("--with-text", action="store_true",
+                   help="Give the agent search_by_text: find articles by what they say.")
+    p.add_argument("--text-limit", type=int, default=5,
+                   help="Articles kept per search_by_text call.")
+    p.add_argument("--text-gate", type=float, default=None,
+                   help="Call search_by_text only where the best pooled paragraph "
+                        "scores below this. Evidence-driven iteration: the model's "
+                        "own sense of whether it has enough has failed every test.")
+    p.add_argument("--force-text", action="store_true",
+                   help="Require one search_by_text call before the agent may answer.")
     p.add_argument("--retrieval-mode", default="bm25+reranker",
                    choices=["bm25+reranker", "reranker", "rrf"],
                    help="Paragraph retrieval pipeline: 'bm25+reranker' (default) "
@@ -68,7 +78,9 @@ def build_agent(args):
                       max_iterations=args.max_iterations,
                       force_first=args.force_first,
                       retrieval_mode=args.retrieval_mode,
-                      rrf_k=args.rrf_k)
+                      rrf_k=args.rrf_k,
+                      with_text=args.with_text, text_limit=args.text_limit,
+                      force_text=args.force_text, text_gate=args.text_gate)
 
 
 def format_trace(messages) -> str:
@@ -164,6 +176,9 @@ def main():
         model=args.model_name,
         top_k=args.top_k,
         rerank_top_n=args.rerank_top_n,
+        with_text=args.with_text,
+        force_text=args.force_text,
+        text_gate=args.text_gate,
         bm25_top_m=args.bm25_top_m,
         max_iterations=args.max_iterations,
         force_first_tool=args.force_first,

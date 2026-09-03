@@ -21,6 +21,9 @@ class LookupArticleInput(BaseModel):
 class SearchParagraphsInput(BaseModel):
     query: str = Field(..., description="A short, highly focused keyword phrase (e.g. 'Arabidopsis lyrata outcrossing') to find specific information. Do not use full sentences or questions.")
 
+class SearchByTextInput(BaseModel):
+    query: str = Field(..., description="Distinctive words that would appear in the article you want — a species name, a place, a technical term. Rare words work, generic ones ('large', 'population', 'typically') do not.")
+
 class ReadArticleInput(BaseModel):
     title: str = Field(..., description="The EXACT title of the Wikipedia article, exactly as it appeared in previous tool results.")
     query: str = Field(..., description="The keyword phrase to search for inside this specific article.")
@@ -42,11 +45,22 @@ def _format(paragraphs: list[tuple[str, str]]) -> str:
 
 def build_tools(retriever, kb, reranker, bm25, image,
                 top_n=5, top_k=20, bm25_top_m=50, lookup_limit=5,
-                retrieval_mode: str = "reranker", rrf_k: int = 60):
+                retrieval_mode: str = "reranker", rrf_k: int = 60,
+                text_limit: int = 5, with_text: bool = False, state=None):
     """Retrieval tools for one query image, over a working set the agent grows.
 
-    Two ways into the KB — by image (EVA-CLIP/FAISS) and by name — and two
-    ways to read: search across all candidates, or read one article deeply.
+    Up to three ways into the KB — by image (EVA-CLIP/FAISS), by name, and with
+    ``with_text`` by what the articles say — and two ways to read: search across
+    all candidates, or read one article deeply.
+
+    The text entry is the one the pipeline cannot use well. Given the question
+    verbatim it lifts article coverage from 46.6% to 56.1%, but stacking its
+    articles onto the pool costs more in noise than it wins: measured, it gains
+    55 points where it alone finds the article and loses 9 on the five times as
+    many where the article was already there. An agent can call it only after
+    seeing that what it read is about the wrong entity, and can put the rare
+    word the question lacks into the query — which is the whole reason to try
+    this in an agent rather than a fixed pipeline.
     The working set tracks how each article was found (provenance) but this
     information is kept internal; tool outputs are unchanged.
 
@@ -56,6 +70,7 @@ def build_tools(retriever, kb, reranker, bm25, image,
       "rrf"            — BM25 + BGE independent rankings → Reciprocal Rank Fusion
     """
     candidates: dict[str, Candidate] = {}   # keyed by wiki_url
+    state = {} if state is None else state   # per-example, never shared
     tried: set[str] = set()
     tried_raw: set[str] = set()
     cache: dict = {}
@@ -72,6 +87,15 @@ def build_tools(retriever, kb, reranker, bm25, image,
                     sources={"image"},
                     image_score=a.get("score"),
                 )
+
+    def _register_text(articles: list[dict]) -> None:
+        for a in articles:
+            url = a["wiki_url"]
+            if url in candidates:
+                candidates[url].sources.add("text")
+            else:
+                candidates[url] = Candidate(title=a["title"], wiki_url=url,
+                                            sources={"text"}, image_score=None)
 
     def _register_lookup(articles: list[dict]) -> None:
         for a in articles:
@@ -106,6 +130,28 @@ def build_tools(retriever, kb, reranker, bm25, image,
             ]
             cache["pool_key"] = key
         return cache["pool"]
+
+    @tool(args_schema=SearchByTextInput)
+    def search_by_text(query: str) -> str:
+        """Find articles by what is WRITTEN in them, not by the picture.
+
+        The only tool that does not depend on recognising the subject: it
+        searches the text of all 2M articles for your words. Use it when the
+        passages you have read are about the wrong thing, or when you cannot
+        name what you see but the question mentions something concrete — a
+        place, a date, a measurement, a technical term.
+
+        Choose rare words. This finds the article 6 times out of 10 when the
+        query holds something distinctive, and almost never when it is made of
+        common words. Whatever it finds joins your candidates.
+        """
+        found = kb.search_articles_by_text(query, limit=text_limit)
+        if not found:
+            return (f"Nothing found for '{query}'. Those words are probably too "
+                    f"common — try more specific ones.")
+        _register_text(found)
+        return ("Added to your candidates:\n"
+                + "\n".join(f"- {a['title']}" for a in found))
 
     @tool(args_schema=LookupArticleInput)
     def lookup_article(name: str) -> str:
@@ -188,7 +234,10 @@ def build_tools(retriever, kb, reranker, bm25, image,
             bm25_top_m=bm25_top_m, bm25_ranker=bm25, reranker=reranker,
             rrf_k=rrf_k,
         )
+        
+        state["top_score"] = getattr(reranker, "last_top_score", None)
         return _format([(by_text.get(p, "?"), p) for p in best]) if best else \
             "No relevant paragraphs found."
 
-    return [lookup_article, search_by_image, search_paragraphs, read_article]
+    tools = [lookup_article, search_by_image, search_paragraphs, read_article]
+    return tools + [search_by_text] if with_text else tools
