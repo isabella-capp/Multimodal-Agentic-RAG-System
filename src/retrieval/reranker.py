@@ -20,6 +20,7 @@ class CrossEncoderReranker:
     ):
         self.device = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
         self.max_length = max_length
+        self.last_top_score: float | None = None
 
         print(f"Loading cross-encoder reranker {model_name} ({dtype}) …")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -59,4 +60,16 @@ class CrossEncoderReranker:
             scores.extend(logits.float().tolist())
 
         order = sorted(range(len(paragraphs)), key=lambda i: scores[i], reverse=True)
+        self.last_top_score = scores[order[0]] if order else None
         return [paragraphs[i] for i in order[:top_n]]
+
+    def score_of_best(self, query: str, paragraphs: list[str], **kw) -> float | None:
+        """Relevance of the best paragraph in the pool, on the model's own scale.
+
+        How well the pool answers the question, in one number, and the natural
+        trigger for a second retrieval round: asking the agent whether what it
+        read is enough has failed every time we tried it, while this is measured
+        and costs nothing — the scores are computed anyway and were thrown away.
+        """
+        self.rerank(query, paragraphs, top_n=1, force_sort=True, **kw)
+        return self.last_top_score
